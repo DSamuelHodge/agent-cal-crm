@@ -58,6 +58,33 @@ impl<T> IoResultExt<T> for T {
     }
 }
 
+/// Minimal HTTPS GET (via the device's `curl`) returning the response body.
+fn http_get(url: &str) -> std::io::Result<String> {
+    const TOOLS: [&str; 2] = [
+        "/data/data/com.termux/files/usr/bin/curl", // phone (Termux)
+        "/usr/bin/curl",                            // Mac / other
+    ];
+    let mut last_err = std::io::Error::other("curl not found");
+    for tool in TOOLS {
+        match std::process::Command::new(tool)
+            .arg("-s")
+            .arg("-m")
+            .arg("10")
+            .arg(url)
+            .output()
+        {
+            Ok(out) if out.status.success() => {
+                return Ok(String::from_utf8_lossy(&out.stdout).to_string());
+            }
+            Ok(out) => {
+                last_err = std::io::Error::other(String::from_utf8_lossy(&out.stderr).to_string())
+            }
+            Err(e) => last_err = e,
+        }
+    }
+    Err(last_err)
+}
+
 /// Fire an informed notification through AutoTask's `cos-informed-notify`.
 ///
 /// Runs on a background thread: AutoTask's HTTP action is blocking on the
@@ -385,6 +412,100 @@ pub async fn sync_contacts(crm: &AgentCrm, p: &serde_json::Value) -> Result<serd
         "skipped": skipped,
         "created_ids": created,
     }))
+}
+
+/// Get the device's current GPS position via `termux-location`.
+fn current_position() -> Option<(f64, f64)> {
+    const TOOL: &str = "/data/data/com.termux/files/usr/bin/termux-location";
+    let out = std::process::Command::new(TOOL)
+        .env("HOME", "/data/data/com.termux/files/home")
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
+    let lat = v.get("latitude")?.as_f64()?;
+    let lon = v.get("longitude")?.as_f64()?;
+    Some((lat, lon))
+}
+
+/// Geocode an address string to (lat, lon) via Nominatim.
+fn geocode(address: &str) -> Option<(f64, f64)> {
+    let q = urlencode(address);
+    let url = format!("https://nominatim.openstreetmap.org/search?format=json&limit=1&q={q}");
+    let text = http_get(&url).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let first = v.as_array()?.first()?;
+    let lat = first.get("lat")?.as_str()?.parse::<f64>().ok()?;
+    let lon = first.get("lon")?.as_str()?.parse::<f64>().ok()?;
+    Some((lat, lon))
+}
+
+/// Driving time (seconds) + distance (m) from one (lat,lon) to another via OSRM.
+fn osrm_travel(o_lat: f64, o_lon: f64, d_lat: f64, d_lon: f64) -> Option<(f64, f64)> {
+    let url = format!(
+        "https://router.project-osrm.org/route/v1/driving/{o_lon:.6},{o_lat:.6};{d_lon:.6},{d_lat:.6}?overview=false"
+    );
+    let text = http_get(&url).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let route = v.get("routes")?.as_array()?.first()?;
+    let duration = route.get("duration")?.as_f64()?;
+    let distance = route.get("distance")?.as_f64()?;
+    Some((duration, distance))
+}
+
+fn urlencode(s: &str) -> String {
+    let mut out = String::new();
+    for b in s.bytes() {
+        match b {
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            b' ' => out.push('+'),
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
+/// Scenario 7 — travel time + maps. Given a destination address, compute the
+/// drive time from the device's GPS and fire an informed notification.
+pub async fn aware_travel(_crm: &AgentCrm, p: &serde_json::Value) -> Result<serde_json::Value> {
+    let dest = strp(p, "destination")?;
+
+    let origin = current_position();
+    let dest_coords = geocode(dest);
+    match (origin, dest_coords) {
+        (Some((olat, olon)), Some((dlat, dlon))) => match osrm_travel(olat, olon, dlat, dlon) {
+            Some((seconds, meters)) => {
+                let mins = (seconds / 60.0).round();
+                let km = meters / 1000.0;
+                let title = "Travel time";
+                let text = format!("{:.0} min · {km:.1} km → {dest}", mins);
+                notify(title, &text);
+                Ok(serde_json::json!({
+                    "origin": [olat, olon],
+                    "destination": [dlat, dlon],
+                    "duration_minutes": mins,
+                    "distance_km": km,
+                    "maps_intent": format!("google.navigation:q={dlat:.6},{dlon:.6}"),
+                    "text": text,
+                }))
+            }
+            None => {
+                notify("Travel time", &format!("Could not route to {dest}"));
+                Ok(serde_json::json!({ "error": "no route" }))
+            }
+        },
+        _ => {
+            notify(
+                "Travel time",
+                "Could not get location or geocode the destination.",
+            );
+            Ok(serde_json::json!({ "error": "no location/geocode" }))
+        }
+    }
 }
 
 /// Scenario 4 — meeting-prep nudge: the next booking on the calendar, with

@@ -255,10 +255,16 @@ pub async fn dispatch(
 
         // ── Cal: links + slots ──────────────────────────────────────────
         "cal.create_link" => {
-            let params = LinkParams::new(
+            let mut params = LinkParams::new(
                 str_param(p, "title")?,
                 i64_param(p, "duration_minutes").unwrap_or(30),
             );
+            if let Some(n) = f64_param(p, "min_notice_hours") {
+                params = params.min_notice_hours(n);
+            }
+            if let Some(d) = i64_param(p, "max_days_ahead") {
+                params = params.max_days_ahead(d);
+            }
             let link = cal.create_link(owner(p)?, params).await?;
             Ok(serde_json::to_value(link)?)
         }

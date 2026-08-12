@@ -39,6 +39,18 @@ returns immediately. Already implemented in `notify()`.
 |--------|--------|----------|
 | `aware.sms` | owner, sender, smsBody | resolve (incl. alt phones) → log interaction → notify name + context; cross-references names in the body against the device contacts app (`termux-contact-list`) and appends `· mentions <name> (<number>)` |
 | `aware.sync_contacts` | owner | one-way sync: device address book → CRM (idempotent; creates any device contact with a number not already in the CRM, logs a "Synced from device address book" NOTE) |
+| `aware.travel` | owner, destination | GPS (`termux-location`) → geocode (Nominatim) → driving time (OSRM) → informed notification `17 min · 16.4 km → <dest>`; returns `maps_intent` (`google.navigation:q=lat,lon`) |
+
+## Travel time + maps (verified 2026-08-12)
+
+`aware.travel` computes the drive to a destination from the device's live GPS
+and fires a notification (relayed to the ScanWatch via Withings'
+`AndroidNotificationListener`, which is active on the G63). To open Maps
+natively, AutoTask's `cos-open-maps` profile launches
+`google.navigation:q=<lat>,<lon>` (a plain `https://google.com/maps` URL opens
+the browser instead — use the navigation intent). Verified on-device:
+17 min / 16.4 km to 200 N High St, Columbus OH; Google Maps opened in the
+foreground.
 
 ## Address-book sync (verified 2026-08-12)
 

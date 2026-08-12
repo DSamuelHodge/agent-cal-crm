@@ -947,7 +947,7 @@
     "priority": 4,
     "createdAt": 1786569640452,
     "updatedAt": 1786569640452,
-    "lastTriggeredAt": 1786573076771
+    "lastTriggeredAt": 1786574555609
   },
   {
     "id": "cos-airplane-mode-guard",
@@ -1008,7 +1008,36 @@
     "priority": 0,
     "createdAt": 1786569640581,
     "updatedAt": 1786569640581,
-    "lastTriggeredAt": 1786573022226
+    "lastTriggeredAt": 1786574756066
+  },
+  {
+    "id": "cos-open-maps",
+    "name": "CoS Open Maps",
+    "description": "Open Google Maps driving directions to a destination",
+    "isEnabled": true,
+    "triggerType": "MANUAL",
+    "triggerConfigJson": {},
+    "conditionsJson": {},
+    "actionsJson": [
+      {
+        "type": "OPEN_URL",
+        "params": {
+          "url": "google.navigation:q={{smsBody}}"
+        }
+      },
+      {
+        "type": "LOG",
+        "params": {
+          "message": "opened maps nav to {{smsBody}}",
+          "level": "info"
+        }
+      }
+    ],
+    "cooldownMs": 0,
+    "priority": 0,
+    "createdAt": 1786574769386,
+    "updatedAt": 1786574800760,
+    "lastTriggeredAt": 1786574774223
   },
   {
     "id": "call-direct",
