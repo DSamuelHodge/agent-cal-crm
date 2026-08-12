@@ -56,20 +56,34 @@ with `{"method": "...", "params": {"owner": "derrick", ...}}`.
   (`run-as` cannot read Termux home from a normal shell, so either run the
   copy from inside Termux or use `run-as com.termux`).
 
-## Auto-start (optional)
+## Auto-start (Termux:Boot) — DONE
 
-`com.termux.boot` can run a boot script. Create
-`~/.termux/boot/cos-start.sh`:
+The boot script lives in the repo at `termux/20-cos-daemon`. It is installed
+on the phone at `~/.termux/boot/20-cos-daemon` and runs on every boot:
 
 ```sh
-#!/data/data/com.termux/files/usr/bin/sh
-export HOME=/data/data/com.termux/files/home
-$HOME/projects/target/release/cos serve --addr 127.0.0.1:8790 --db $HOME/cos.db >> $HOME/serve.log 2>&1
+# already installed; reinstall after edits:
+adb push termux/20-cos-daemon /data/local/tmp/
+adb shell "run-as com.termux cp /data/local/tmp/20-cos-daemon \
+    /data/data/com.termux/files/home/.termux/boot/20-cos-daemon"
+adb shell "run-as com.termux chmod 755 \
+    /data/data/com.termux/files/home/.termux/boot/20-cos-daemon"
 ```
 
-Then on the Mac, `adb forward tcp:8790 tcp:8790` still applies after each
-USB reconnect. Note: port forwarding is per-device-connection — re-run the
-forward after reconnecting the phone.
+Behavior (verified 2026-08-12):
+- Waits 20s after boot for the system to settle.
+- Idempotently seeds the DB, then starts `cos serve` on `127.0.0.1:8790`,
+  detached via `setsid nohup` so it survives the boot script's exit
+  (daemon has PPID 1).
+- Health-checks by `curl http://127.0.0.1:8790/ping`, retrying for ~15s;
+  exits 0 only once the daemon actually responds.
+- Idempotent: re-running with the daemon already up logs `OK already running`.
+- Logs to `~/.termux/boot-logs/cos-daemon.log`.
+
+On the Mac, after each USB reconnect:
+```bash
+adb forward tcp:8790 tcp:8790   # port forwarding is per-device-connection
+```
 
 ## Full CoS RPC methods
 

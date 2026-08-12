@@ -1,0 +1,71 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# Termux:Boot — start the CoS daemon (calendar + CRM RPC over loopback).
+# Reached by the Mac via: adb forward tcp:8790 tcp:8790
+set +e
+
+export HOME="/data/data/com.termux/files/home"
+export PREFIX="/data/data/com.termux/files/usr"
+export PATH="$PREFIX/bin:/system/bin:/system/xbin:$PATH"
+export LD_LIBRARY_PATH="$PREFIX/lib"
+export TMPDIR="$PREFIX/tmp"
+export ANDROID_DATA="/data"
+mkdir -p "$TMPDIR" "$HOME/.termux/boot-logs"
+
+LOG="$HOME/.termux/boot-logs/cos-daemon.log"
+BIN="$HOME/projects/target/release/cos"
+DB="$HOME/cos.db"
+PORT=8790
+
+ts() { date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo '?'; }
+log() { echo "$(ts) $*" >>"$LOG"; }
+
+# Self-match-safe process probe. `pidof` matches the exact binary name "cos",
+# which is unique to the daemon (the script's own cmdline is "20-cos-daemon",
+# so it never self-matches).
+is_up() {
+  pidof cos >/dev/null 2>&1
+}
+cos_pid() {
+  pidof cos 2>/dev/null | awk '{print $1}'
+}
+
+# True when the daemon answers the loopback ping.
+responds() {
+  "$PREFIX/bin/curl" -s -m 2 "http://127.0.0.1:$PORT/ping" 2>/dev/null | grep -q '"ok":true'
+  return $?
+}
+
+log "==== boot cos-daemon start pid=$$ ===="
+
+# Settle after BOOT_COMPLETED
+sleep 20
+
+if [ ! -x "$BIN" ]; then
+  log "FAIL binary missing: $BIN"
+  exit 1
+fi
+
+# Already running?
+if is_up && responds; then
+  log "OK already running pid=$(cos_pid)"
+  exit 0
+fi
+# Ensure the DB exists (idempotent seed) before serving.
+"$BIN" seed --db "$DB" >>"$LOG" 2>&1
+
+# Start the daemon, detached into its own session so it survives this
+# script's exit (run-as / boot teardown would otherwise kill the child).
+setsid nohup "$BIN" serve --addr "127.0.0.1:$PORT" --db "$DB" >>"$LOG" 2>&1 &
+
+# Poll until it answers (up to ~15s), not just until a process appears.
+for n in 1 2 3 4 5 6 7; do
+  sleep 2
+  if responds; then
+    log "OK listening on 127.0.0.1:$PORT pid=$(cos_pid)"
+    exit 0
+  fi
+done
+
+log "FAIL not responding on 127.0.0.1:$PORT after start"
+tail -5 "$LOG" >>"$LOG"
+exit 1
