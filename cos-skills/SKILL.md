@@ -53,6 +53,15 @@ returns immediately. Already implemented in `notify()`.
   > · mentions Curtis Jewell (614-519-1846), Shaun Ford (+16144460190)
 - Prereq: Termux needs `android.permission.READ_CONTACTS` granted (already
   granted on the G63).
+
+## Auto-capture: the CoS builds its own relationship graph
+
+`aware.sms` doesn't just mention device contacts — anyone named in the SMS who
+is **not yet in the CRM** is auto-added as a contact (first/last split from the
+display name, phone attached), and a `NOTE` interaction is logged
+("Auto-captured from SMS mention: <body>"). Verified on-device: an SMS naming
+Shaun Ford + Curtis Jewell added both to the CRM with their device numbers,
+and the notification marked them `✓new`.
 | `aware.call` | owner, number | resolve → notify "Name calling — VIP/title" |
 | `aware.capture` | owner, first_name, last_name, company?, phone?, email?, amount? | create company/contact/deal → confirm |
 | `aware.meeting` | owner | next booking + attendee CRM context → prep nudge |

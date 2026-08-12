@@ -134,15 +134,27 @@ fn mentioned_device_contacts(body: &str) -> Vec<DeviceContact> {
         .collect()
 }
 
+/// Split a display name like "Shaun Ford" into (first, last).
+fn split_name(name: &str) -> (String, String) {
+    let mut parts = name.split_whitespace();
+    let first = parts.next().unwrap_or("").to_string();
+    let last = parts.collect::<Vec<_>>().join(" ");
+    (first, last)
+}
+
 /// Enrich context with device contacts mentioned in the message, cross-referenced
-/// against the CRM. Returns a display string like
-/// ` · mentions Shaun Ford (+16144460190), Curtis Jewell (614-519-1846)`.
-async fn mention_context(crm: &AgentCrm, owner: &str, body: &str) -> String {
+/// against the CRM. Anyone named but not yet in the CRM is **auto-captured**
+/// as a contact (the CoS builds its own relationship graph from conversation).
+///
+/// Returns `(display_string, newly_created_contact_ids)`. Display looks like
+/// ` · mentions Shaun Ford (+16144460190) ✓new, Curtis Jewell (614-519-1846)`.
+async fn mention_context(crm: &AgentCrm, owner: &str, body: &str) -> (String, Vec<String>) {
     let mentioned = mentioned_device_contacts(body);
     if mentioned.is_empty() {
-        return String::new();
+        return (String::new(), Vec::new());
     }
     let mut parts: Vec<String> = Vec::new();
+    let mut captured: Vec<String> = Vec::new();
     for c in mentioned {
         let in_crm = crm
             .resolve_by_phone(owner, &c.number)
@@ -150,6 +162,24 @@ async fn mention_context(crm: &AgentCrm, owner: &str, body: &str) -> String {
             .ok()
             .flatten()
             .is_some();
+        if !in_crm && !c.number.is_empty() {
+            let (first, last) = split_name(&c.name);
+            if let Ok(contact) = crm
+                .create_contact(owner, &first, &last)
+                .await
+                .map(|contact| contact.with_phone(&c.number))
+            {
+                let _ = crm
+                    .log_interaction(
+                        owner,
+                        InteractionInput::new(&contact.id, InteractionKind::Note)
+                            .with_summary(format!("Auto-captured from SMS mention: {body}")),
+                    )
+                    .await;
+                crm.update_contact(&contact).await.ok();
+                captured.push(contact.id);
+            }
+        }
         parts.push(format!(
             "{}{}",
             c.name,
@@ -158,11 +188,11 @@ async fn mention_context(crm: &AgentCrm, owner: &str, body: &str) -> String {
             } else if in_crm {
                 format!(" ({}) ✓", c.number)
             } else {
-                format!(" ({})", c.number)
+                format!(" ({}) ✓new", c.number)
             }
         ));
     }
-    format!(" · mentions {}", parts.join(", "))
+    (format!(" · mentions {}", parts.join(", ")), captured)
 }
 
 /// Scenario 1 — SMS-aware triage: resolve sender, log the interaction, and
@@ -171,7 +201,7 @@ pub async fn aware_sms(crm: &AgentCrm, p: &serde_json::Value) -> Result<serde_js
     let owner = strp(p, "owner")?;
     let sender = strp(p, "sender")?;
     let body = strp(p, "smsBody").unwrap_or("");
-    let mentions = mention_context(crm, owner, body).await;
+    let (mentions, captured) = mention_context(crm, owner, body).await;
 
     match crm.resolve_by_phone(owner, sender).await? {
         Some(c) => {
@@ -202,6 +232,7 @@ pub async fn aware_sms(crm: &AgentCrm, p: &serde_json::Value) -> Result<serde_js
                 "contact_id": c.id,
                 "title": title,
                 "text": text,
+                "captured_contacts": captured,
             }))
         }
         None => {
@@ -213,6 +244,7 @@ pub async fn aware_sms(crm: &AgentCrm, p: &serde_json::Value) -> Result<serde_js
                 "known": false,
                 "sender": sender,
                 "text": format!("{sender} not in CRM"),
+                "captured_contacts": captured,
             }))
         }
     }
