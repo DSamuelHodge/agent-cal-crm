@@ -20,6 +20,8 @@ use std::sync::Arc;
 use agentcal::rpc::dispatch;
 use agentcal::{AgentCal, AgentCrm, LibSqlStore};
 
+mod aware;
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
@@ -201,7 +203,17 @@ async fn route(request: &str, cal: &AgentCal, crm: &AgentCrm) -> String {
     let method_name = v.get("method").and_then(|m| m.as_str()).unwrap_or("");
     let params = v.get("params").cloned().unwrap_or(serde_json::Value::Null);
 
-    match dispatch(cal, crm, method_name, &params).await {
+    // Situational-awareness methods (cos brain → informed phone action).
+    let result = match method_name {
+        "aware.sms" => crate::aware::aware_sms(crm, &params).await,
+        "aware.call" => crate::aware::aware_call(crm, &params).await,
+        "aware.capture" => crate::aware::aware_capture(crm, &params).await,
+        "aware.meeting" => crate::aware::aware_meeting(cal, crm, &params).await,
+        "aware.briefing" => crate::aware::aware_briefing(cal, crm, &params).await,
+        "aware.deals" => crate::aware::aware_deals(crm, &params).await,
+        _ => dispatch(cal, crm, method_name, &params).await,
+    };
+    match result {
         Ok(value) => http_json(200, &json_ok(value)),
         Err(e) => http_json(200, &json_err(&e.to_string())),
     }

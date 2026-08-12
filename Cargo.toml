@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2021"
 description = "A calendar engine built for agents — no GUI, no HTTP, libSQL-backed store."
 license = "MIT"
+# `aware.rs` is a module of the `cos` binary, not a binary of its own.
+autobins = false
 
 [dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "net", "io-util"] }
@@ -17,3 +19,8 @@ thiserror = "1"
 
 [dev-dependencies]
 tempfile = "3"
+
+[[bin]]
+name = "cos"
+path = "src/bin/cos.rs"
+

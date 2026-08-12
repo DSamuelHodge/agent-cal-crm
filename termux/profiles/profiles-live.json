@@ -1,0 +1,1035 @@
+[
+  {
+    "id": "cos-search-hodge-luke",
+    "name": "CoS Browser Search Hodge Luke",
+    "description": "Opens Google search in the phone browser for Derrick Hodge, CEO of Hodge Luke.",
+    "isEnabled": true,
+    "triggerType": "MANUAL",
+    "triggerConfigJson": {},
+    "conditionsJson": {},
+    "actionsJson": [
+      {
+        "type": "OPEN_URL",
+        "params": {
+          "url": "https:\/\/www.google.com\/search?q=Derrick+Hodge+CEO+of+Hodge+Luke"
+        }
+      },
+      {
+        "type": "LOG",
+        "params": {
+          "message": "CoS opened browser search for Derrick Hodge",
+          "level": "INFO"
+        }
+      }
+    ],
+    "cooldownMs": 0,
+    "priority": 62,
+    "createdAt": 1786569638934,
+    "updatedAt": 1786569638934,
+    "lastTriggeredAt": 0
+  },
+  {
+    "id": "cos-locate-hodge-luke",
+    "name": "CoS Locate Hodge Luke HQ",
+    "description": "Opens Google Maps to Hodge Luke headquarters at 315 E Long St, Columbus OH; Derrick Hodge is President & CEO.",
+    "isEnabled": true,
+    "triggerType": "MANUAL",
+    "triggerConfigJson": {},
+    "conditionsJson": {},
+    "actionsJson": [
+      {
+        "type": "OPEN_URL",
+        "params": {
+          "url": "https:\/\/www.google.com\/maps\/search\/?api=1&query=Hodge+Luke%2C+315+E+Long+St+Suite+104%2C+Columbus%2C+OH+43215"
+        }
+      },
+      {
+        "type": "NOTIFICATION",
+        "params": {
+          "title": "CoS Locate",
+          "text": "Derrick Hodge, President & CEO of Hodge Luke. HQ: 315 E Long St Suite 104, Columbus, OH 43215.",
+          "priority": "high"
+        }
+      },
+      {
+        "type": "LOG",
+        "params": {
+          "message": "CoS located Hodge Luke HQ for Derrick Hodge",
+          "level": "INFO"
+        }
+      }
+    ],
+    "cooldownMs": 0,
+    "priority": 61,
+    "createdAt": 1786569638999,
+    "updatedAt": 1786569638999,
+    "lastTriggeredAt": 0
+  },
+  {
+    "id": "cos-commute-live",
+    "name": "CoS Live Commute Check",
+    "description": "Opens Google Maps directions to a destination from current device location; Maps computes live travel time.",
+    "isEnabled": true,
+    "triggerType": "MANUAL",
+    "triggerConfigJson": {},
+    "conditionsJson": {},
+    "actionsJson": [
+      {
+        "type": "OPEN_URL",
+        "params": {
+          "url": "https:\/\/www.google.com\/maps\/dir\/?api=1&destination=Easton%20Town%20Center%2C%20Columbus%2C%20OH"
+        }
+      },
+      {
+        "type": "NOTIFICATION",
+        "params": {
+          "title": "CoS Commute",
+          "text": "Directions opened to Easton Town Center. Watch for live travel time.",
+          "priority": "high"
+        }
+      },
+      {
+        "type": "LOG",
+        "params": {
+          "message": "CoS Live Commute fired to Easton",
+          "level": "INFO"
+        }
+      }
+    ],
+    "cooldownMs": 0,
+    "priority": 60,
+    "createdAt": 1786569639082,
+    "updatedAt": 1786569639082,
+    "lastTriggeredAt": 0
+  },
+  {
+    "id": "cos-aware-call",
+    "name": "CoS Aware Call",
+    "description": "On an incoming call: resolve the caller in CRM and flash an informed context notification.",
+    "isEnabled": true,
+    "triggerType": "INCOMING_CALL",
+    "triggerConfigJson": {
+      "state": "RINGING"
+    },
+    "conditionsJson": {},
+    "actionsJson": [
+      {
+        "type": "HTTP",
+        "params": {
+          "url": "http:\/\/127.0.0.1:8790\/",
+          "method": "POST",
+          "body": "{\"method\":\"aware.call\",\"params\":{\"owner\":\"derrick\",\"number\":\"{{number}}\"}}"
+        }
+      },
+      {
+        "type": "LOG",
+        "params": {
+          "message": "aware-call: {{number}}",
+          "level": "info"
+        }
+      }
+    ],
+    "cooldownMs": 15000,
+    "priority": 50,
+    "createdAt": 1786569639151,
+    "updatedAt": 1786569639151,
+    "lastTriggeredAt": 0
+  },
+  {
+    "id": "cos-aware-sms",
+    "name": "CoS Aware SMS",
+    "description": "On any SMS: resolve sender in CRM, log the interaction, and surface an informed notification with context.",
+    "isEnabled": true,
+    "triggerType": "SMS",
+    "triggerConfigJson": {},
+    "conditionsJson": {},
+    "actionsJson": [
+      {
+        "type": "HTTP",
+        "params": {
+          "url": "http:\/\/127.0.0.1:8790\/",
+          "method": "POST",
+          "body": "{\"method\":\"aware.sms\",\"params\":{\"owner\":\"derrick\",\"sender\":\"{{sender}}\",\"smsBody\":\"{{smsBody}}\"}}"
+        }
+      },
+      {
+        "type": "LOG",
+        "params": {
+          "message": "aware-sms: {{sender}}",
+          "level": "info"
+        }
+      }
+    ],
+    "cooldownMs": 15000,
+    "priority": 50,
+    "createdAt": 1786569639222,
+    "updatedAt": 1786569639222,
+    "lastTriggeredAt": 1786570004447
+  },
+  {
+    "id": "cos-focus-block",
+    "name": "CoS Focus Block",
+    "description": "Protects a working block: enables priority DND, sets quiet audio, dims screen slightly, and logs the context switch.",
+    "isEnabled": true,
+    "triggerType": "MANUAL",
+    "triggerConfigJson": {},
+    "conditionsJson": {},
+    "actionsJson": [
+      {
+        "type": "DND",
+        "params": {
+          "enabled": true,
+          "policy": "priority"
+        }
+      },
+      {
+        "type": "AUDIO",
+        "params": {
+          "ringerMode": "vibrate",
+          "stream": "notification",
+          "volume": 2
+        }
+      },
+      {
+        "type": "BRIGHTNESS",
+        "params": {
+          "level": 90,
+          "auto": false
+        }
+      },
+      {
+        "type": "NOTIFICATION",
+        "params": {
+          "title": "Focus Block Active",
+          "text": "I am protecting your attention window. Priority interruptions only.",
+          "priority": "normal"
+        }
+      },
+      {
+        "type": "LOG",
+        "params": {
+          "message": "CoS Focus Block activated",
+          "level": "info"
+        }
+      }
+    ],
+    "cooldownMs": 0,
+    "priority": 50,
+    "createdAt": 1786569639281,
+    "updatedAt": 1786569639281,
+    "lastTriggeredAt": 0
+  },
+  {
+    "id": "cos-focus-restore",
+    "name": "CoS Restore Normal Mode",
+    "description": "Restores normal availability after a protected work block.",
+    "isEnabled": true,
+    "triggerType": "MANUAL",
+    "triggerConfigJson": {},
+    "conditionsJson": {},
+    "actionsJson": [
+      {
+        "type": "DND",
+        "params": {
+          "enabled": false,
+          "policy": "all"
+        }
+      },
+      {
+        "type": "AUDIO",
+        "params": {
+          "ringerMode": "normal",
+          "stream": "notification",
+          "volume": 8
+        }
+      },
+      {
+        "type": "BRIGHTNESS",
+        "params": {
+          "level": 180,
+          "auto": true
+        }
+      },
+      {
+        "type": "NOTIFICATION",
+        "params": {
+          "title": "Normal Mode Restored",
+          "text": "Focus block ended. Alerts and normal device behavior restored.",
+          "priority": "normal"
+        }
+      },
+      {
+        "type": "LOG",
+        "params": {
+          "message": "CoS Restore Normal Mode activated",
+          "level": "info"
+        }
+      }
+    ],
+    "cooldownMs": 0,
+    "priority": 49,
+    "createdAt": 1786569639343,
+    "updatedAt": 1786569639343,
+    "lastTriggeredAt": 0
+  },
+  {
+    "id": "cos-mobile-briefing",
+    "name": "CoS Mobile Briefing",
+    "description": "Launches the morning operator surface: announces readiness, opens the communication surface, and logs that the briefing path began.",
+    "isEnabled": true,
+    "triggerType": "MANUAL",
+    "triggerConfigJson": {},
+    "conditionsJson": {},
+    "actionsJson": [
+      {
+        "type": "NOTIFICATION",
+        "params": {
+          "title": "Chief of Staff Briefing",
+          "text": "Starting your communication review: Gmail first, then priority follow-ups.",
+          "priority": "high"
+        }
+      },
+      {
+        "type": "SPEAK",
+        "params": {
+          "text": "Chief of Staff briefing started. Opening Gmail for priority review."
+        }
+      },
+      {
+        "type": "OPEN_URL",
+        "params": {
+          "url": "mailto:?subject=Priority%20review"
+        }
+      },
+      {
+        "type": "LOG",
+        "params": {
+          "message": "CoS Mobile Briefing opened communication review surface",
+          "level": "info"
+        }
+      }
+    ],
+    "cooldownMs": 0,
+    "priority": 48,
+    "createdAt": 1786569639403,
+    "updatedAt": 1786569639403,
+    "lastTriggeredAt": 0
+  },
+  {
+    "id": "cos-send-delay-notice",
+    "name": "CoS Send Delay Notice",
+    "description": "Human-approved SMS helper: sends a concise delay notice using payload number and message.",
+    "isEnabled": true,
+    "triggerType": "MANUAL",
+    "triggerConfigJson": {},
+    "conditionsJson": {},
+    "actionsJson": [
+      {
+        "type": "SEND_SMS",
+        "params": {
+          "number": "{{number}}",
+          "text": "{{message}}"
+        }
+      },
+      {
+        "type": "LOG",
+        "params": {
+          "message": "CoS sent approved SMS notice to {{number}}",
+          "level": "info"
+        }
+      }
+    ],
+    "cooldownMs": 0,
+    "priority": 47,
+    "createdAt": 1786569639460,
+    "updatedAt": 1786569639460,
+    "lastTriggeredAt": 0
+  },
+  {
+    "id": "cos-urgent-sms-triage",
+    "name": "CoS Urgent SMS Triage",
+    "description": "When an incoming SMS contains urgent language, surfaces it loudly and records the sender for follow-up.",
+    "isEnabled": true,
+    "triggerType": "SMS",
+    "triggerConfigJson": {
+      "bodyContains": "urgent"
+    },
+    "conditionsJson": {},
+    "actionsJson": [
+      {
+        "type": "NOTIFICATION",
+        "params": {
+          "title": "Urgent SMS Triage",
+          "text": "Urgent message from {{sender}}: {{smsBody}}",
+          "priority": "high"
+        }
+      },
+      {
+        "type": "SPEAK",
+        "params": {
+          "text": "Urgent message received. I have raised it for immediate attention."
+        }
+      },
+      {
+        "type": "LOG",
+        "params": {
+          "message": "Urgent SMS triaged from {{sender}}",
+          "level": "warn"
+        }
+      }
+    ],
+    "cooldownMs": 60000,
+    "priority": 46,
+    "createdAt": 1786569639517,
+    "updatedAt": 1786569639517,
+    "lastTriggeredAt": 0
+  },
+  {
+    "id": "cos-executive-battery-guard",
+    "name": "CoS Executive Battery Guard",
+    "description": "Protects continuity when battery is low: warns, dims screen, and prompts a charger check.",
+    "isEnabled": true,
+    "triggerType": "BATTERY",
+    "triggerConfigJson": {
+      "levelBelow": 25,
+      "isCharging": false
+    },
+    "conditionsJson": {},
+    "actionsJson": [
+      {
+        "type": "BRIGHTNESS",
+        "params": {
+          "level": 70,
+          "auto": false
+        }
+      },
+      {
+        "type": "NOTIFICATION",
+        "params": {
+          "title": "Battery Continuity Watch",
+          "text": "Battery is at {{levelPercent}}%. I dimmed the screen and recommend charging before calls.",
+          "priority": "high"
+        }
+      },
+      {
+        "type": "SPEAK",
+        "params": {
+          "text": "Battery is low. I recommend charging before your next call."
+        }
+      },
+      {
+        "type": "LOG",
+        "params": {
+          "message": "Executive Battery Guard activated at {{levelPercent}} percent",
+          "level": "warn"
+        }
+      }
+    ],
+    "cooldownMs": 300000,
+    "priority": 45,
+    "createdAt": 1786569639573,
+    "updatedAt": 1786569639573,
+    "lastTriggeredAt": 0
+  },
+  {
+    "id": "call-then-sms",
+    "name": "Call then SMS fallback (generalized)",
+    "description": "Calls a number from payload, then sends a fallback SMS asking for a callback. Reusable for any recipient.",
+    "isEnabled": true,
+    "triggerType": "MANUAL",
+    "triggerConfigJson": {},
+    "conditionsJson": {},
+    "actionsJson": [
+      {
+        "type": "CALL",
+        "params": {
+          "number": "{{number}}"
+        }
+      },
+      {
+        "type": "WAIT",
+        "params": {
+          "durationMs": 30000
+        }
+      },
+      {
+        "type": "SEND_SMS",
+        "params": {
+          "number": "{{number}}",
+          "text": "{{message}}"
+        }
+      },
+      {
+        "type": "LOG",
+        "params": {
+          "message": "Call+SMS flow complete for {{number}}",
+          "level": "INFO"
+        }
+      }
+    ],
+    "cooldownMs": 0,
+    "priority": 10,
+    "createdAt": 1786569639636,
+    "updatedAt": 1786569639636,
+    "lastTriggeredAt": 0
+  },
+  {
+    "id": "cos-battery-advisory",
+    "name": "Low Battery Advisory",
+    "description": "Speaks alert and posts notification when battery drops below 20%",
+    "isEnabled": true,
+    "triggerType": "BATTERY",
+    "triggerConfigJson": {
+      "levelBelow": 20,
+      "isCharging": false
+    },
+    "conditionsJson": {},
+    "actionsJson": [
+      {
+        "type": "NOTIFICATION",
+        "params": {
+          "title": "Low Battery Alert",
+          "text": "Battery level is {{levelPercent}}%",
+          "priority": "high"
+        }
+      },
+      {
+        "type": "SPEAK",
+        "params": {
+          "text": "Warning: Battery level is at {{levelPercent}} percent."
+        }
+      }
+    ],
+    "cooldownMs": 300000,
+    "priority": 10,
+    "createdAt": 1786569639705,
+    "updatedAt": 1786569639705,
+    "lastTriggeredAt": 0
+  },
+  {
+    "id": "sleep-morning-restore",
+    "name": "Morning Restore - 7AM",
+    "description": "Daily at 7 AM: Disable DND, restore ringer, brighten screen",
+    "isEnabled": true,
+    "triggerType": "TIME",
+    "triggerConfigJson": {
+      "hour": 7,
+      "minute": 0,
+      "days": [
+        "MON",
+        "TUE",
+        "WED",
+        "THU",
+        "FRI",
+        "SAT",
+        "SUN"
+      ]
+    },
+    "conditionsJson": {},
+    "actionsJson": [
+      {
+        "type": "DND",
+        "params": {
+          "enabled": false,
+          "policy": "all"
+        }
+      },
+      {
+        "type": "AUDIO",
+        "params": {
+          "ringerMode": "normal"
+        }
+      },
+      {
+        "type": "BRIGHTNESS",
+        "params": {
+          "level": 200,
+          "auto": true
+        }
+      },
+      {
+        "type": "NOTIFICATION",
+        "params": {
+          "title": "Morning Mode",
+          "text": "Bedtime mode deactivated. DND off, ringer restored.",
+          "priority": "low"
+        }
+      },
+      {
+        "type": "LOG",
+        "params": {
+          "message": "Sleep mode deactivated (DND off + ringer + brightness) at 7AM",
+          "level": "INFO"
+        }
+      }
+    ],
+    "cooldownMs": 0,
+    "priority": 10,
+    "createdAt": 1786569639765,
+    "updatedAt": 1786569639765,
+    "lastTriggeredAt": 0
+  },
+  {
+    "id": "sleep-night-mode",
+    "name": "Sleep Mode - 11PM Bedtime",
+    "description": "Daily at 11 PM: Enable DND, silence ringer, dim screen for sleep",
+    "isEnabled": true,
+    "triggerType": "TIME",
+    "triggerConfigJson": {
+      "hour": 23,
+      "minute": 0,
+      "days": [
+        "MON",
+        "TUE",
+        "WED",
+        "THU",
+        "FRI",
+        "SAT",
+        "SUN"
+      ]
+    },
+    "conditionsJson": {},
+    "actionsJson": [
+      {
+        "type": "DND",
+        "params": {
+          "enabled": true,
+          "policy": "priority"
+        }
+      },
+      {
+        "type": "AUDIO",
+        "params": {
+          "ringerMode": "silent"
+        }
+      },
+      {
+        "type": "BRIGHTNESS",
+        "params": {
+          "level": 10,
+          "auto": false
+        }
+      },
+      {
+        "type": "NOTIFICATION",
+        "params": {
+          "title": "Sleep Mode",
+          "text": "Bedtime mode activated. DND on, ringer silenced, screen dimmed.",
+          "priority": "low"
+        }
+      },
+      {
+        "type": "LOG",
+        "params": {
+          "message": "Sleep mode activated (DND + silent + dim) at 11PM",
+          "level": "INFO"
+        }
+      }
+    ],
+    "cooldownMs": 0,
+    "priority": 10,
+    "createdAt": 1786569639818,
+    "updatedAt": 1786569639818,
+    "lastTriggeredAt": 0
+  },
+  {
+    "id": "cos-boot-check",
+    "name": "System Boot Health Check",
+    "description": "Executes on system startup to verify AutoTask engine readiness",
+    "isEnabled": true,
+    "triggerType": "BOOT",
+    "triggerConfigJson": {},
+    "conditionsJson": {},
+    "actionsJson": [
+      {
+        "type": "NOTIFICATION",
+        "params": {
+          "title": "AutoTask Ready",
+          "text": "Tool Server engine initialized and ready on boot.",
+          "priority": "normal"
+        }
+      },
+      {
+        "type": "LOG",
+        "params": {
+          "message": "System startup verified by AutoTask engine",
+          "level": "INFO"
+        }
+      }
+    ],
+    "cooldownMs": 0,
+    "priority": 10,
+    "createdAt": 1786569639878,
+    "updatedAt": 1786569639878,
+    "lastTriggeredAt": 0
+  },
+  {
+    "id": "cos-incoming-call-flash",
+    "name": "Incoming Call Strobe Alert",
+    "description": "Toggles flashlight torch and notifies on incoming phone calls",
+    "isEnabled": false,
+    "triggerType": "INCOMING_CALL",
+    "triggerConfigJson": {
+      "state": "RINGING"
+    },
+    "conditionsJson": {},
+    "actionsJson": [
+      {
+        "type": "FLASHLIGHT",
+        "params": {
+          "on": true
+        }
+      },
+      {
+        "type": "NOTIFICATION",
+        "params": {
+          "title": "Incoming Call",
+          "text": "Call ringing from {{number}}",
+          "priority": "high"
+        }
+      }
+    ],
+    "cooldownMs": 5000,
+    "priority": 9,
+    "createdAt": 1786569639935,
+    "updatedAt": 1786569639935,
+    "lastTriggeredAt": 0
+  },
+  {
+    "id": "cos-quiet-night",
+    "name": "Night Mode Silence",
+    "description": "Sets ringer mode to silent and enables DND at 10:00 PM",
+    "isEnabled": true,
+    "triggerType": "TIME",
+    "triggerConfigJson": {
+      "hour": 22,
+      "minute": 0
+    },
+    "conditionsJson": {},
+    "actionsJson": [
+      {
+        "type": "AUDIO",
+        "params": {
+          "ringerMode": "silent"
+        }
+      },
+      {
+        "type": "DND",
+        "params": {
+          "enabled": true,
+          "policy": "priority"
+        }
+      },
+      {
+        "type": "NOTIFICATION",
+        "params": {
+          "title": "AutoTask",
+          "text": "Silent mode activated for night.",
+          "priority": "low"
+        }
+      }
+    ],
+    "cooldownMs": 3600000,
+    "priority": 8,
+    "createdAt": 1786569639999,
+    "updatedAt": 1786569639999,
+    "lastTriggeredAt": 0
+  },
+  {
+    "id": "cos-power-save-auto",
+    "name": "Power Saver Response",
+    "description": "Triggers toast popup and vibration pattern when Battery Saver mode activates",
+    "isEnabled": true,
+    "triggerType": "POWER_SAVE",
+    "triggerConfigJson": {
+      "enabled": true
+    },
+    "conditionsJson": {},
+    "actionsJson": [
+      {
+        "type": "TOAST",
+        "params": {
+          "text": "Power Saver Mode Engaged",
+          "duration": "short"
+        }
+      },
+      {
+        "type": "VIBRATE",
+        "params": {
+          "durationMs": 300
+        }
+      }
+    ],
+    "cooldownMs": 60000,
+    "priority": 8,
+    "createdAt": 1786569640055,
+    "updatedAt": 1786569640055,
+    "lastTriggeredAt": 0
+  },
+  {
+    "id": "cos-bluetooth-audio",
+    "name": "Bluetooth Audio Connect",
+    "description": "Speaks connection event and adjusts volume when Bluetooth device connects",
+    "isEnabled": false,
+    "triggerType": "BLUETOOTH",
+    "triggerConfigJson": {
+      "connected": true
+    },
+    "conditionsJson": {},
+    "actionsJson": [
+      {
+        "type": "SPEAK",
+        "params": {
+          "text": "Connected to Bluetooth device {{deviceName}}."
+        }
+      },
+      {
+        "type": "AUDIO",
+        "params": {
+          "ringerMode": "normal",
+          "stream": "media",
+          "volume": 10
+        }
+      }
+    ],
+    "cooldownMs": 30000,
+    "priority": 7,
+    "createdAt": 1786569640118,
+    "updatedAt": 1786569640118,
+    "lastTriggeredAt": 0
+  },
+  {
+    "id": "cos-sms-status-reader",
+    "name": "SMS Status Reader",
+    "description": "Announces incoming SMS messages containing the keyword 'status'",
+    "isEnabled": true,
+    "triggerType": "SMS",
+    "triggerConfigJson": {
+      "bodyContains": "status"
+    },
+    "conditionsJson": {},
+    "actionsJson": [
+      {
+        "type": "SPEAK",
+        "params": {
+          "text": "Status request received from {{sender}}."
+        }
+      },
+      {
+        "type": "NOTIFICATION",
+        "params": {
+          "title": "SMS Status Request",
+          "text": "From {{sender}}: {{smsBody}}",
+          "priority": "normal"
+        }
+      }
+    ],
+    "cooldownMs": 30000,
+    "priority": 7,
+    "createdAt": 1786569640187,
+    "updatedAt": 1786569640187,
+    "lastTriggeredAt": 0
+  },
+  {
+    "id": "cos-headset-jack",
+    "name": "Wired Headset Auto Adjust",
+    "description": "Shows toast and logs when wired headset is plugged or unplugged",
+    "isEnabled": true,
+    "triggerType": "HEADSET",
+    "triggerConfigJson": {
+      "connected": true
+    },
+    "conditionsJson": {},
+    "actionsJson": [
+      {
+        "type": "TOAST",
+        "params": {
+          "text": "Wired headset connected",
+          "duration": "short"
+        }
+      },
+      {
+        "type": "VIBRATE",
+        "params": {
+          "durationMs": 150
+        }
+      }
+    ],
+    "cooldownMs": 10000,
+    "priority": 6,
+    "createdAt": 1786569640250,
+    "updatedAt": 1786569640250,
+    "lastTriggeredAt": 0
+  },
+  {
+    "id": "cos-light-sensor-brightness",
+    "name": "Low Light Ambient Mode",
+    "description": "Adjusts display brightness level when ambient light drops below 10 lux",
+    "isEnabled": true,
+    "triggerType": "LIGHT",
+    "triggerConfigJson": {
+      "belowLux": 10
+    },
+    "conditionsJson": {},
+    "actionsJson": [
+      {
+        "type": "BRIGHTNESS",
+        "params": {
+          "level": 30,
+          "auto": false
+        }
+      },
+      {
+        "type": "TOAST",
+        "params": {
+          "text": "Low light detected. Brightness dimmed.",
+          "duration": "short"
+        }
+      }
+    ],
+    "cooldownMs": 120000,
+    "priority": 5,
+    "createdAt": 1786569640321,
+    "updatedAt": 1786569640321,
+    "lastTriggeredAt": 0
+  },
+  {
+    "id": "cos-wifi-welcome",
+    "name": "Wi-Fi Connection Notifier",
+    "description": "Notifies and logs when connected to a Wi-Fi network",
+    "isEnabled": true,
+    "triggerType": "WIFI",
+    "triggerConfigJson": {
+      "connected": true
+    },
+    "conditionsJson": {},
+    "actionsJson": [
+      {
+        "type": "NOTIFICATION",
+        "params": {
+          "title": "Wi-Fi Connected",
+          "text": "Connected to {{ssid}}",
+          "priority": "normal"
+        }
+      },
+      {
+        "type": "LOG",
+        "params": {
+          "message": "Auto-connected to Wi-Fi SSID {{ssid}}",
+          "level": "INFO"
+        }
+      }
+    ],
+    "cooldownMs": 60000,
+    "priority": 5,
+    "createdAt": 1786569640392,
+    "updatedAt": 1786569640392,
+    "lastTriggeredAt": 0
+  },
+  {
+    "id": "cos-screen-unlock-welcome",
+    "name": "Device Unlock Greeting",
+    "description": "Fires a toast popup and vibrates when device is unlocked by user",
+    "isEnabled": true,
+    "triggerType": "DEVICE_UNLOCKED",
+    "triggerConfigJson": {},
+    "conditionsJson": {},
+    "actionsJson": [
+      {
+        "type": "TOAST",
+        "params": {
+          "text": "Welcome back! AutoTask engine active.",
+          "duration": "short"
+        }
+      }
+    ],
+    "cooldownMs": 60000,
+    "priority": 4,
+    "createdAt": 1786569640452,
+    "updatedAt": 1786569640452,
+    "lastTriggeredAt": 0
+  },
+  {
+    "id": "cos-airplane-mode-guard",
+    "name": "Airplane Mode Logger",
+    "description": "Logs event and displays toast when Airplane Mode is toggled",
+    "isEnabled": false,
+    "triggerType": "AIRPLANE_MODE",
+    "triggerConfigJson": {},
+    "conditionsJson": {},
+    "actionsJson": [
+      {
+        "type": "LOG",
+        "params": {
+          "message": "Airplane mode state toggled",
+          "level": "INFO"
+        }
+      },
+      {
+        "type": "TOAST",
+        "params": {
+          "text": "Airplane Mode State Updated",
+          "duration": "short"
+        }
+      }
+    ],
+    "cooldownMs": 10000,
+    "priority": 3,
+    "createdAt": 1786569640515,
+    "updatedAt": 1786569640515,
+    "lastTriggeredAt": 0
+  },
+  {
+    "id": "cos-informed-notify",
+    "name": "CoS Informed Notify",
+    "description": "renders notification from cos payload",
+    "isEnabled": true,
+    "triggerType": "MANUAL",
+    "triggerConfigJson": {},
+    "conditionsJson": {},
+    "actionsJson": [
+      {
+        "type": "NOTIFICATION",
+        "params": {
+          "title": "{{sender}}",
+          "text": "{{smsBody}}",
+          "priority": "high"
+        }
+      },
+      {
+        "type": "LOG",
+        "params": {
+          "message": "informed-notify: {{sender}} \/ {{smsBody}}",
+          "level": "info"
+        }
+      }
+    ],
+    "cooldownMs": 0,
+    "priority": 0,
+    "createdAt": 1786569640581,
+    "updatedAt": 1786569640581,
+    "lastTriggeredAt": 1786570004559
+  },
+  {
+    "id": "call-direct",
+    "name": "Direct Call",
+    "description": "",
+    "isEnabled": false,
+    "triggerType": "MANUAL",
+    "triggerConfigJson": {},
+    "conditionsJson": {},
+    "actionsJson": [
+      {
+        "type": "CALL",
+        "params": {
+          "number": "+16144064920"
+        }
+      }
+    ],
+    "cooldownMs": 0,
+    "priority": 0,
+    "createdAt": 1786569640646,
+    "updatedAt": 1786569640646,
+    "lastTriggeredAt": 0
+  }
+]
