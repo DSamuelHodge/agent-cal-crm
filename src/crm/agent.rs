@@ -285,6 +285,52 @@ impl AgentCrm {
         });
         Ok(attendee)
     }
+
+    /// Reverse of [`AgentCrm::attendee_for_contact`]: resolve a calendar
+    /// [`crate::Attendee`] back to its CRM [`Contact`].
+    ///
+    /// Uses the `contact_id` stamp written by `attendee_for_contact` when
+    /// present; otherwise falls back to an email match. Errors with
+    /// [`crate::AgentError::ContactNotFound`] when neither resolves.
+    pub async fn contact_for_attendee(
+        &self,
+        owner_id: &str,
+        attendee: &crate::Attendee,
+    ) -> Result<Contact> {
+        if let Some(id) = attendee.metadata.get("contact_id").and_then(|v| v.as_str()) {
+            if let Ok(contact) = self.get_contact(owner_id, id).await {
+                return Ok(contact);
+            }
+        }
+        if !attendee.email.is_empty() {
+            if let Some(contact) = self.resolve_by_email(owner_id, &attendee.email).await? {
+                return Ok(contact);
+            }
+        }
+        Err(AgentError::ContactNotFound(attendee.id.clone()))
+    }
+
+    /// Resolve the CRM [`Contact`] behind a booking's first CRM-linked
+    /// attendee (see [`AgentCrm::attendee_for_contact`]). Returns
+    /// `ContactNotFound` when the booking has no attendees stamped with a
+    /// `contact_id`.
+    pub async fn contact_for_booking(
+        &self,
+        owner_id: &str,
+        booking: &crate::Booking,
+    ) -> Result<Contact> {
+        for attendee in &booking.attendees {
+            if attendee
+                .metadata
+                .get("contact_id")
+                .and_then(|v| v.as_str())
+                .is_some()
+            {
+                return self.contact_for_attendee(owner_id, attendee).await;
+            }
+        }
+        Err(AgentError::ContactNotFound(booking.id.clone()))
+    }
 }
 
 /// Small helper: attach an optional deal id to a new interaction.

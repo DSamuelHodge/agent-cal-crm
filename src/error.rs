@@ -104,3 +104,9 @@ impl From<StoreError> for AgentError {
         AgentError::Store(e)
     }
 }
+
+impl From<serde_json::Error> for AgentError {
+    fn from(e: serde_json::Error) -> Self {
+        AgentError::Validation(e.to_string())
+    }
+}

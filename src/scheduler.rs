@@ -11,7 +11,7 @@ use crate::types::{Attendee, Booking, BookingLink, Calendar, ConflictPolicy, Sta
 
 /// Outcome of a successful `book` — the new booking plus conflict metadata
 /// (preserves the Python `message` channel for agent reasoning).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Booked {
     pub booking: Booking,
     pub message: String,
@@ -20,7 +20,7 @@ pub struct Booked {
 }
 
 /// Outcome of a successful `reschedule`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Rescheduled {
     pub booking: Booking,
     pub old_slot: TimeSlot,

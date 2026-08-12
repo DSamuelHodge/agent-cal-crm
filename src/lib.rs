@@ -29,7 +29,9 @@ pub mod agent_api;
 pub mod availability;
 pub mod crm;
 pub mod error;
+pub mod rpc;
 pub mod scheduler;
+pub mod seed;
 pub mod store;
 pub mod types;
 

@@ -6,7 +6,7 @@ description = "A calendar engine built for agents — no GUI, no HTTP, libSQL-ba
 license = "MIT"
 
 [dependencies]
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "net", "io-util"] }
 libsql = "0.9"
 async-trait = "0.1"
 uuid = { version = "1", features = ["v4", "serde"] }

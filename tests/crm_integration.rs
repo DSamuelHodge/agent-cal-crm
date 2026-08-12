@@ -469,6 +469,108 @@ async fn test_calendar_and_crm_share_one_store() {
     );
 }
 
+// ── CRM ⇄ calendar round-trip: contact → attendee → booking → contact ────────
+#[tokio::test]
+async fn test_booking_resolves_back_to_contact() {
+    use agentcal::{AgentCal, LinkParams};
+    let store = LibSqlStore::in_memory().await.unwrap();
+
+    let crm = AgentCrm::new(store.clone());
+    let calendar = AgentCal::new(store);
+
+    let co = crm
+        .create_company("derrick", "Hodge Luke", "AI")
+        .await
+        .unwrap();
+    let contact = crm
+        .create_contact("derrick", "Derrick", "Hodge")
+        .await
+        .unwrap()
+        .with_company(&co.id)
+        .with_phone("+16142600424")
+        .with_email("hodge@agentmail.com");
+    crm.update_contact(&contact).await.unwrap();
+
+    calendar
+        .create_calendar_simple("derrick", "Derrick's Calendar")
+        .await
+        .unwrap();
+    calendar
+        .add_window("derrick", Some(0), "09:00", "17:00", "")
+        .await
+        .unwrap();
+    let link = calendar
+        .create_link("derrick", LinkParams::new("30-min sync", 30))
+        .await
+        .unwrap();
+    let slots = calendar
+        .get_slots("derrick", &link.id, None, None, Some(1))
+        .await
+        .unwrap();
+    let slot = slots[0].clone();
+
+    // Contact → attendee (CRM stamp) → booking.
+    let attendee = crm
+        .attendee_for_contact("derrick", &contact.id)
+        .await
+        .unwrap();
+    let booked = calendar
+        .book(
+            "derrick",
+            &link.id,
+            slot,
+            vec![attendee],
+            "Intro call",
+            serde_json::Value::Null,
+        )
+        .await
+        .unwrap();
+
+    // Booking → attendee → contact (the reverse, previously missing).
+    let booking = calendar
+        .get_booking("derrick", &booked.booking.id)
+        .await
+        .unwrap();
+    let resolved = crm.contact_for_booking("derrick", &booking).await.unwrap();
+    assert_eq!(resolved.id, contact.id);
+    assert_eq!(resolved.first_name, "Derrick");
+
+    // Also exercise the single-attendee resolver directly.
+    let resolved2 = crm
+        .contact_for_attendee("derrick", &booking.attendees[0])
+        .await
+        .unwrap();
+    assert_eq!(resolved2.id, contact.id);
+}
+
+// ── Contact resolution falls back to email match when not stamped ─────────────
+#[tokio::test]
+async fn test_contact_for_attendee_email_fallback() {
+    use agentcal::Attendee;
+    let crm = AgentCrm::new(LibSqlStore::in_memory().await.unwrap());
+    let contact = crm
+        .create_contact("derrick", "Derrick", "Hodge")
+        .await
+        .unwrap()
+        .with_email("hodge@agentmail.com");
+    crm.update_contact(&contact).await.unwrap();
+
+    // Unstamped attendee — resolves purely by email.
+    let attendee = Attendee::new("Derrick Hodge", "hodge@agentmail.com");
+    let resolved = crm
+        .contact_for_attendee("derrick", &attendee)
+        .await
+        .unwrap();
+    assert_eq!(resolved.id, contact.id);
+
+    // Unknown email → ContactNotFound.
+    let stranger = Attendee::new("Someone Else", "nobody@example.com");
+    assert!(crm
+        .contact_for_attendee("derrick", &stranger)
+        .await
+        .is_err());
+}
+
 // ── Persistence round-trip over a real file ──────────────────────────────────
 
 #[tokio::test]
