@@ -38,6 +38,15 @@ returns immediately. Already implemented in `notify()`.
 | Method | Params | Behavior |
 |--------|--------|----------|
 | `aware.sms` | owner, sender, smsBody | resolve (incl. alt phones) → log interaction → notify name + context; cross-references names in the body against the device contacts app (`termux-contact-list`) and appends `· mentions <name> (<number>)` |
+| `aware.sync_contacts` | owner | one-way sync: device address book → CRM (idempotent; creates any device contact with a number not already in the CRM, logs a "Synced from device address book" NOTE) |
+
+## Address-book sync (verified 2026-08-12)
+
+`aware.sync_contacts` mirrors the phone's contacts into the CRM so everyone
+is already known before they text/call. Ran on the G63: 3 created
+(Ada Lovelace, John Lombela, Mariam El Mezabi Wife), 3 skipped (already
+known); re-run is a no-op. The boot script (`termux/20-cos-daemon`) runs it
+automatically after startup.
 
 ## Alt-phone + device-contact enrichment (verified 2026-08-12)
 

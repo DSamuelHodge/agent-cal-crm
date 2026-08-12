@@ -208,6 +208,7 @@ async fn route(request: &str, cal: &AgentCal, crm: &AgentCrm) -> String {
         "aware.sms" => crate::aware::aware_sms(crm, &params).await,
         "aware.call" => crate::aware::aware_call(crm, &params).await,
         "aware.capture" => crate::aware::aware_capture(crm, &params).await,
+        "aware.sync_contacts" => crate::aware::sync_contacts(crm, &params).await,
         "aware.meeting" => crate::aware::aware_meeting(cal, crm, &params).await,
         "aware.briefing" => crate::aware::aware_briefing(cal, crm, &params).await,
         "aware.deals" => crate::aware::aware_deals(crm, &params).await,

@@ -334,6 +334,59 @@ pub async fn aware_capture(crm: &AgentCrm, p: &serde_json::Value) -> Result<serd
     }))
 }
 
+/// Sync the phone's address book into the CRM. Every device contact with a
+/// number that isn't already in the CRM (matched by any number, primary or
+/// alt) is created. Returns created + skipped counts.
+pub async fn sync_contacts(crm: &AgentCrm, p: &serde_json::Value) -> Result<serde_json::Value> {
+    let owner = strp(p, "owner")?;
+    let contacts = device_contacts().unwrap_or_default();
+    let mut created: Vec<String> = Vec::new();
+    let mut skipped = 0usize;
+
+    for c in contacts {
+        if c.number.is_empty() {
+            skipped += 1;
+            continue;
+        }
+        // Already known by any number?
+        let known = crm
+            .resolve_by_phone(owner, &c.number)
+            .await
+            .ok()
+            .flatten()
+            .is_some();
+        if known {
+            skipped += 1;
+            continue;
+        }
+        let (first, last) = split_name(&c.name);
+        if let Ok(contact) = crm
+            .create_contact(owner, &first, &last)
+            .await
+            .map(|contact| contact.with_phone(&c.number))
+        {
+            let _ = crm
+                .log_interaction(
+                    owner,
+                    InteractionInput::new(&contact.id, InteractionKind::Note)
+                        .with_summary("Synced from device address book"),
+                )
+                .await;
+            crm.update_contact(&contact).await.ok();
+            created.push(contact.id);
+        }
+    }
+
+    let title = "Contacts sync";
+    let text = format!("{} created, {} already known", created.len(), skipped);
+    notify(title, &text);
+    Ok(serde_json::json!({
+        "created": created.len(),
+        "skipped": skipped,
+        "created_ids": created,
+    }))
+}
+
 /// Scenario 4 — meeting-prep nudge: the next booking on the calendar, with
 /// the attendee's CRM context (who, which company, what's in flight).
 pub async fn aware_meeting(
