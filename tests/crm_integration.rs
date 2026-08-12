@@ -106,6 +106,34 @@ macro_rules! crm_suite {
             }
 
             #[tokio::test]
+            async fn test_resolve_by_alt_phone() {
+                let crm = make().await;
+                let contact = crm
+                    .create_contact("derrick", "Derrick", "Hodge")
+                    .await
+                    .unwrap()
+                    .with_phone("+16142600424")
+                    .with_alt_phone("+16144074920");
+                crm.update_contact(&contact).await.unwrap();
+
+                // Alt phone resolves to the same contact.
+                let hit = crm
+                    .resolve_by_phone("derrick", "+16144074920")
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(hit.id, contact.id);
+                assert_eq!(hit.all_phones().len(), 2);
+
+                // Unrelated number still misses.
+                assert!(crm
+                    .resolve_by_phone("derrick", "+15551234567")
+                    .await
+                    .unwrap()
+                    .is_none());
+            }
+
+            #[tokio::test]
             async fn test_resolve_by_email() {
                 let crm = make().await;
                 let contact = crm

@@ -37,7 +37,22 @@ returns immediately. Already implemented in `notify()`.
 
 | Method | Params | Behavior |
 |--------|--------|----------|
-| `aware.sms` | owner, sender, smsBody | resolve → log interaction → notify name + context (or "Unknown sender") |
+| `aware.sms` | owner, sender, smsBody | resolve (incl. alt phones) → log interaction → notify name + context; cross-references names in the body against the device contacts app (`termux-contact-list`) and appends `· mentions <name> (<number>)` |
+
+## Alt-phone + device-contact enrichment (verified 2026-08-12)
+
+- `Contact` supports multiple numbers via `with_alt_phone` (stored in
+  `metadata.alt_phones`); `resolve_by_phone` matches every number.
+  Example: Derrick Hodge's second line `+16144074920` resolves to him.
+- `aware.sms` runs `termux-contact-list` (absolute path
+  `/data/data/com.termux/files/usr/bin/termux-contact-list` — the daemon's
+  PATH is the Android default, not Termux's) and matches contact names
+  mentioned in the SMS body. Result verified on-device:
+  > Derrick Hodge: "Please call Shaun Ford and follow-up on when we will meet
+  > with Curtis Jewell this week" · VIP · 1 open deal(s) · President and CEO
+  > · mentions Curtis Jewell (614-519-1846), Shaun Ford (+16144460190)
+- Prereq: Termux needs `android.permission.READ_CONTACTS` granted (already
+  granted on the G63).
 | `aware.call` | owner, number | resolve → notify "Name calling — VIP/title" |
 | `aware.capture` | owner, first_name, last_name, company?, phone?, email?, amount? | create company/contact/deal → confirm |
 | `aware.meeting` | owner | next booking + attendee CRM context → prep nudge |

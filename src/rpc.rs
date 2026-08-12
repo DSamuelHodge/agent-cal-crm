@@ -126,6 +126,10 @@ pub async fn dispatch(
                 crm.get_contact(owner(p)?, cid).await?,
             )?)
         }
+        "crm.update_contact" => {
+            let contact: crate::crm::types::Contact = serde_json::from_value(p["contact"].clone())?;
+            Ok(serde_json::to_value(crm.update_contact(&contact).await?)?)
+        }
         "crm.list_contacts" => Ok(serde_json::to_value(crm.list_contacts(owner(p)?).await?)?),
 
         // ── CRM: deals ──────────────────────────────────────────────────

@@ -625,13 +625,14 @@ impl CrmStore for LibSqlStore {
             .map_err(StoreError::from)?;
         while let Some(row) = rows.next().await.map_err(StoreError::from)? {
             let c = decode_contact(&row)?;
-            let candidate = c
-                .phone
-                .chars()
-                .filter(|ch| ch.is_ascii_digit())
-                .collect::<String>();
-            if !candidate.is_empty() && candidate.ends_with(&normalized) {
-                return Ok(Some(c));
+            for candidate in c.all_phones() {
+                let digits = candidate
+                    .chars()
+                    .filter(|ch| ch.is_ascii_digit())
+                    .collect::<String>();
+                if candidate == phone || (!digits.is_empty() && digits.ends_with(&normalized)) {
+                    return Ok(Some(c));
+                }
             }
         }
         Ok(None)

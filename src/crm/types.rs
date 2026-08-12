@@ -185,6 +185,34 @@ impl Contact {
         self
     }
 
+    /// Add an alternate phone number (stored in `metadata.alt_phones`).
+    /// `resolve_by_phone` matches against every number, not just `phone`.
+    pub fn with_alt_phone(mut self, phone: impl Into<String>) -> Self {
+        let phones = self
+            .metadata
+            .get("alt_phones")
+            .and_then(|v| v.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let mut phones = phones;
+        phones.push(phone.into());
+        self.metadata["alt_phones"] = serde_json::json!(phones);
+        self
+    }
+
+    /// Every number on this contact: primary `phone` + `metadata.alt_phones`.
+    pub fn all_phones(&self) -> Vec<String> {
+        let mut out = vec![self.phone.clone()];
+        if let Some(arr) = self.metadata.get("alt_phones").and_then(|v| v.as_array()) {
+            out.extend(arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())));
+        }
+        out
+    }
+
     pub fn with_email(mut self, email: impl Into<String>) -> Self {
         self.email = email.into();
         self

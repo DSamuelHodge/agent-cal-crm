@@ -31,6 +31,7 @@ pub async fn seed_cos(crm: &AgentCrm, owner: &str) -> Result<()> {
             .await?
             .with_company(&company.id)
             .with_phone("+16142600424")
+            .with_alt_phone("+16144074920")
             .with_email("hodge@agentmail.com")
             .with_title("President and CEO")
             .with_vip();

@@ -80,12 +80,98 @@ pub fn notify(title: &str, text: &str) {
 
 // ── Scenario handlers ─────────────────────────────────────────────────────────
 
+/// A contact from the device's address book (`termux-contact-list`).
+struct DeviceContact {
+    name: String,
+    number: String,
+}
+
+/// Read the phone's contacts via `termux-contact-list` (Termux has
+/// READ_CONTACTS granted). Uses the absolute path because the daemon's PATH
+/// (started via `setsid` from a bare shell) is the Android default, not
+/// Termux's. Returns `None` if the tool is unavailable.
+fn device_contacts() -> Option<Vec<DeviceContact>> {
+    const TOOL: &str = "/data/data/com.termux/files/usr/bin/termux-contact-list";
+    let out = std::process::Command::new(TOOL)
+        .env("HOME", "/data/data/com.termux/files/home")
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    let v: serde_json::Value = serde_json::from_str(&text).ok()?;
+    Some(
+        v.as_array()?
+            .iter()
+            .filter_map(|c| {
+                let name = c.get("name")?.as_str()?.to_string();
+                let number = c
+                    .get("number")
+                    .and_then(|n| n.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                if name.is_empty() {
+                    None
+                } else {
+                    Some(DeviceContact { name, number })
+                }
+            })
+            .collect(),
+    )
+}
+
+/// Find device contacts whose name appears in the SMS body (case-insensitive).
+fn mentioned_device_contacts(body: &str) -> Vec<DeviceContact> {
+    let lower = body.to_lowercase();
+    device_contacts()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|c| {
+            let n = c.name.to_lowercase();
+            !n.is_empty() && lower.contains(&n)
+        })
+        .collect()
+}
+
+/// Enrich context with device contacts mentioned in the message, cross-referenced
+/// against the CRM. Returns a display string like
+/// ` · mentions Shaun Ford (+16144460190), Curtis Jewell (614-519-1846)`.
+async fn mention_context(crm: &AgentCrm, owner: &str, body: &str) -> String {
+    let mentioned = mentioned_device_contacts(body);
+    if mentioned.is_empty() {
+        return String::new();
+    }
+    let mut parts: Vec<String> = Vec::new();
+    for c in mentioned {
+        let in_crm = crm
+            .resolve_by_phone(owner, &c.number)
+            .await
+            .ok()
+            .flatten()
+            .is_some();
+        parts.push(format!(
+            "{}{}",
+            c.name,
+            if c.number.is_empty() {
+                String::new()
+            } else if in_crm {
+                format!(" ({}) ✓", c.number)
+            } else {
+                format!(" ({})", c.number)
+            }
+        ));
+    }
+    format!(" · mentions {}", parts.join(", "))
+}
+
 /// Scenario 1 — SMS-aware triage: resolve sender, log the interaction, and
 /// surface context (or flag an unknown number for capture).
 pub async fn aware_sms(crm: &AgentCrm, p: &serde_json::Value) -> Result<serde_json::Value> {
     let owner = strp(p, "owner")?;
     let sender = strp(p, "sender")?;
     let body = strp(p, "smsBody").unwrap_or("");
+    let mentions = mention_context(crm, owner, body).await;
 
     match crm.resolve_by_phone(owner, sender).await? {
         Some(c) => {
@@ -106,7 +192,10 @@ pub async fn aware_sms(crm: &AgentCrm, p: &serde_json::Value) -> Result<serde_js
                 .unwrap_or_default();
             let vip = if c.is_vip { " · VIP" } else { "" };
             let title = c.display_name();
-            let text = format!("{}: \"{}\"\n{}{} · {}", title, body, vip, deal_str, c.title);
+            let text = format!(
+                "{}: \"{}\"\n{}{} · {}{}",
+                title, body, vip, deal_str, c.title, mentions
+            );
             notify(&title, &text);
             Ok(serde_json::json!({
                 "known": true,
@@ -117,10 +206,9 @@ pub async fn aware_sms(crm: &AgentCrm, p: &serde_json::Value) -> Result<serde_js
         }
         None => {
             // Unknown number — flag for capture (no contact created here).
-            notify(
-                "Unknown sender",
-                &format!("{sender} not in CRM.\n\"{body}\""),
-            );
+            let title = format!("Unknown sender ({sender})");
+            let text = format!("Not in CRM.\n\"{body}\"{mentions}");
+            notify(&title, &text);
             Ok(serde_json::json!({
                 "known": false,
                 "sender": sender,

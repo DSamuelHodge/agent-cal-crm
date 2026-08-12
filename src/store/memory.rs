@@ -234,9 +234,14 @@ impl CrmStore for MemoryStore {
         let normalized: String = phone.chars().filter(|c| c.is_ascii_digit()).collect();
         let map = self.contacts.lock().await;
         for c in map.values().filter(|c| c.owner_id == owner_id) {
-            let candidate: String = c.phone.chars().filter(|ch| ch.is_ascii_digit()).collect();
-            if c.phone == phone || (!candidate.is_empty() && candidate.ends_with(&normalized)) {
-                return Ok(Some(c.clone()));
+            for candidate in c.all_phones() {
+                let candidate_digits: String =
+                    candidate.chars().filter(|ch| ch.is_ascii_digit()).collect();
+                if candidate == phone
+                    || (!candidate_digits.is_empty() && candidate_digits.ends_with(&normalized))
+                {
+                    return Ok(Some(c.clone()));
+                }
             }
         }
         Ok(None)
