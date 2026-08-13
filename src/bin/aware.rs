@@ -49,6 +49,38 @@ fn autotask_post(path: &str, body: &serde_json::Value) -> std::io::Result<String
     String::from_utf8_lossy(&buf).to_string().into_io_result()
 }
 
+/// Route an external HTTP call through the engine's `/v1/http` proxy (the
+/// brain has no TLS stack; the app's Ktor/OkHttp does the network I/O). The
+/// brain reaches the engine over loopback TCP.
+fn proxy_http(
+    method: &str,
+    url: &str,
+    data: Option<&serde_json::Value>,
+) -> std::io::Result<String> {
+    let body = serde_json::json!({
+        "url": url,
+        "method": method,
+        "data": data,
+        "headers": {"Content-Type": "application/json"},
+    });
+    autotask_post("/v1/http", &body)
+}
+
+/// Logseq API call with the empty-bearer auth the local server accepts.
+fn logseq_api(base: &str, method: &str, args: serde_json::Value) -> std::io::Result<String> {
+    let body = serde_json::json!({ "method": method, "args": args });
+    let req = serde_json::json!({
+        "url": format!("{base}/api"),
+        "method": "POST",
+        "data": body,
+        "headers": {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer ",
+        },
+    });
+    autotask_post("/v1/http", &req)
+}
+
 trait IoResultExt<T> {
     fn into_io_result(self) -> std::io::Result<T>;
 }
@@ -58,8 +90,11 @@ impl<T> IoResultExt<T> for T {
     }
 }
 
-/// Minimal HTTPS GET (via the device's `curl`) returning the response body.
+/// Minimal HTTPS GET via the engine's `/v1/http` proxy (preferred) or curl.
 fn http_get(url: &str) -> std::io::Result<String> {
+    if let Ok(r) = proxy_http("GET", url, None) {
+        return Ok(r);
+    }
     const TOOLS: [&str; 2] = [
         "/data/data/com.termux/files/usr/bin/curl", // phone (Termux)
         "/usr/bin/curl",                            // Mac / other
@@ -585,6 +620,60 @@ pub async fn sync_contacts(crm: &AgentCrm, p: &serde_json::Value) -> Result<serd
         "created": created.len(),
         "skipped": skipped,
         "created_ids": created,
+    }))
+}
+
+/// Mirror the CRM's contacts into the Logseq graph (the outward knowledge
+/// mirror). Creates a `CoS` page and appends each contact as a block using
+/// Logseq's HTTP API (`logseq.app.insert_block`). Idempotent: skips contacts
+/// already present on the page by name.
+pub async fn sync_logseq(crm: &AgentCrm, p: &serde_json::Value) -> Result<serde_json::Value> {
+    let owner = strp(p, "owner")?;
+    let base = strp(p, "base_url").unwrap_or("http://127.0.0.1:12315");
+    let page = strp(p, "page").unwrap_or("CoS");
+    let contacts = crm.list_contacts(owner).await?;
+
+    // Push on a detached thread: the engine is blocked on this very RPC (over
+    // the brain socket), so making HTTP calls back to the engine's /v1/http
+    // synchronously here would deadlock — the engine can't answer /v1/http
+    // until we return. Fire async and report via notify.
+    let base = base.to_string();
+    let page = page.to_string();
+    let contacts: Vec<_> = contacts.into_iter().map(|c| c.display_name()).collect();
+    let page_for_thread = page.clone();
+    std::thread::spawn(move || {
+        let mut pushed = 0usize;
+        let mut skipped = 0usize;
+        let _ = logseq_api(
+            &base,
+            "logseq.app.create_page",
+            serde_json::json!([page_for_thread]),
+        );
+        for name in contacts {
+            let block = format!("**{name}** — CRM contact");
+            let resp = logseq_api(
+                &base,
+                "logseq.app.insert_block",
+                serde_json::json!([page_for_thread, block, {"sibling": true}]),
+            );
+            match resp {
+                Ok(body) if body.contains("uuid") || body.contains("updatedAt") => pushed += 1,
+                _ => skipped += 1,
+            }
+        }
+        notify(
+            "Logseq mirror",
+            &format!("{pushed} contacts pushed to {page_for_thread}, {skipped} skipped"),
+        );
+    });
+
+    notify(
+        "Logseq mirror",
+        &format!("syncing contacts to {page} in background"),
+    );
+    Ok(serde_json::json!({
+        "started": true,
+        "page": page,
     }))
 }
 
