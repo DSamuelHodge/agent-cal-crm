@@ -206,6 +206,7 @@ async fn route(request: &str, cal: &AgentCal, crm: &AgentCrm) -> String {
     // Situational-awareness methods (cos brain → informed phone action).
     let result = match method_name {
         "aware.sms" => crate::aware::aware_sms(crm, &params).await,
+        "aware.whatsapp" => crate::aware::aware_whatsapp(crm, &params).await,
         "aware.call" => crate::aware::aware_call(crm, &params).await,
         "aware.capture" => crate::aware::aware_capture(crm, &params).await,
         "aware.sync_contacts" => crate::aware::sync_contacts(crm, &params).await,

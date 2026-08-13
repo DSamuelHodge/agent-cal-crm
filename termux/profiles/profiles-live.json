@@ -11,7 +11,7 @@
       {
         "type": "OPEN_URL",
         "params": {
-          "url": "https:\/\/www.google.com\/search?q=Derrick+Hodge+CEO+of+Hodge+Luke"
+          "url": "https://www.google.com/search?q=Derrick+Hodge+CEO+of+Hodge+Luke"
         }
       },
       {
@@ -40,7 +40,7 @@
       {
         "type": "OPEN_URL",
         "params": {
-          "url": "https:\/\/www.google.com\/maps\/search\/?api=1&query=Hodge+Luke%2C+315+E+Long+St+Suite+104%2C+Columbus%2C+OH+43215"
+          "url": "https://www.google.com/maps/search/?api=1&query=Hodge+Luke%2C+315+E+Long+St+Suite+104%2C+Columbus%2C+OH+43215"
         }
       },
       {
@@ -77,7 +77,7 @@
       {
         "type": "OPEN_URL",
         "params": {
-          "url": "https:\/\/www.google.com\/maps\/dir\/?api=1&destination=Easton%20Town%20Center%2C%20Columbus%2C%20OH"
+          "url": "https://www.google.com/maps/dir/?api=1&destination=Easton%20Town%20Center%2C%20Columbus%2C%20OH"
         }
       },
       {
@@ -116,7 +116,7 @@
       {
         "type": "HTTP",
         "params": {
-          "url": "http:\/\/127.0.0.1:8790\/",
+          "url": "http://127.0.0.1:8790/",
           "method": "POST",
           "body": "{\"method\":\"aware.call\",\"params\":{\"owner\":\"derrick\",\"number\":\"{{number}}\"}}"
         }
@@ -147,7 +147,7 @@
       {
         "type": "HTTP",
         "params": {
-          "url": "http:\/\/127.0.0.1:8790\/",
+          "url": "http://127.0.0.1:8790/",
           "method": "POST",
           "body": "{\"method\":\"aware.sms\",\"params\":{\"owner\":\"derrick\",\"sender\":\"{{sender}}\",\"smsBody\":\"{{smsBody}}\"}}"
         }
@@ -999,7 +999,7 @@
       {
         "type": "LOG",
         "params": {
-          "message": "informed-notify: {{sender}} \/ {{smsBody}}",
+          "message": "informed-notify: {{sender}} / {{smsBody}}",
           "level": "info"
         }
       }
@@ -1059,6 +1059,39 @@
     "priority": 0,
     "createdAt": 1786569640646,
     "updatedAt": 1786569640646,
+    "lastTriggeredAt": 0
+  },
+  {
+    "id": "cos-aware-whatsapp",
+    "name": "CoS Aware WhatsApp",
+    "description": "On any WhatsApp notification: resolve sender by name in CRM, log the interaction, and surface an informed notification with context.",
+    "isEnabled": true,
+    "triggerType": "NOTIFICATION",
+    "triggerConfigJson": {
+      "packageName": "com.whatsapp"
+    },
+    "conditionsJson": {},
+    "actionsJson": [
+      {
+        "type": "HTTP",
+        "params": {
+          "url": "http://127.0.0.1:8790/",
+          "method": "POST",
+          "body": "{\"method\":\"aware.whatsapp\",\"params\":{\"owner\":\"derrick\",\"sender\":\"{{title}}\",\"text\":\"{{text}}\"}}"
+        }
+      },
+      {
+        "type": "LOG",
+        "params": {
+          "message": "aware-whatsapp: {{title}}",
+          "level": "info"
+        }
+      }
+    ],
+    "cooldownMs": 15000,
+    "priority": 49,
+    "createdAt": 1786576000000,
+    "updatedAt": 1786576000000,
     "lastTriggeredAt": 0
   }
 ]

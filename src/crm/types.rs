@@ -66,6 +66,7 @@ pub enum InteractionKind {
     Email,
     Meeting,
     Note,
+    Message,
 }
 
 /// Direction of an interaction relative to the owner.

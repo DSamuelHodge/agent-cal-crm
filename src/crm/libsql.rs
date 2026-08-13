@@ -48,6 +48,7 @@ fn kind_str(k: InteractionKind) -> &'static str {
         InteractionKind::Email => "EMAIL",
         InteractionKind::Meeting => "MEETING",
         InteractionKind::Note => "NOTE",
+        InteractionKind::Message => "MESSAGE",
     }
 }
 
@@ -57,6 +58,7 @@ fn kind_from(s: &str) -> InteractionKind {
         "SMS" => InteractionKind::Sms,
         "EMAIL" => InteractionKind::Email,
         "MEETING" => InteractionKind::Meeting,
+        "MESSAGE" => InteractionKind::Message,
         _ => InteractionKind::Note,
     }
 }

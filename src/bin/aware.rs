@@ -277,7 +277,81 @@ pub async fn aware_sms(crm: &AgentCrm, p: &serde_json::Value) -> Result<serde_js
     }
 }
 
-/// Scenario 2 — incoming-call context flash.
+/// Resolve a contact by display name (case-insensitive). WhatsApp notifications
+/// carry the sender's display name (not their number), so the triage hook works
+/// on the name instead of the phone number.
+async fn resolve_by_name(
+    crm: &AgentCrm,
+    owner: &str,
+    name: &str,
+) -> Result<Option<agentcal::crm::Contact>> {
+    let needle = name.trim().to_lowercase();
+    if needle.is_empty() {
+        return Ok(None);
+    }
+    Ok(crm
+        .list_contacts(owner)
+        .await?
+        .into_iter()
+        .find(|c| c.display_name().to_lowercase() == needle))
+}
+
+/// Scenario 2 — WhatsApp message triage. WhatsApp notifications surface the
+/// sender's display name in the notification title; the body is the message.
+/// Mirrors `aware_sms` but resolves by name and logs the interaction as a
+/// message (not SMS).
+pub async fn aware_whatsapp(crm: &AgentCrm, p: &serde_json::Value) -> Result<serde_json::Value> {
+    let owner = strp(p, "owner")?;
+    let sender = strp(p, "sender").unwrap_or("Unknown");
+    let body = strp(p, "text").unwrap_or("");
+    let (mentions, captured) = mention_context(crm, owner, body).await;
+
+    match resolve_by_name(crm, owner, sender).await? {
+        Some(c) => {
+            let _ = crm
+                .log_interaction(
+                    owner,
+                    InteractionInput::new(&c.id, InteractionKind::Message)
+                        .with_direction(InteractionDirection::Inbound)
+                        .with_summary(format!("WhatsApp: {body}")),
+                )
+                .await;
+            let ctx = crm.contact_context(owner, &c.id).await.unwrap_or_default();
+            let deal_str = ctx
+                .get("deals")
+                .and_then(|d| d.as_array())
+                .map(|d| format!(" · {} open deal(s)", d.len()))
+                .unwrap_or_default();
+            let vip = if c.is_vip { " · VIP" } else { "" };
+            let title = c.display_name();
+            let text = format!(
+                "WA: \"{}\"\n{}{} · {}{}",
+                body, vip, deal_str, c.title, mentions
+            );
+            notify(&title, &text);
+            Ok(serde_json::json!({
+                "known": true,
+                "contact_id": c.id,
+                "title": title,
+                "text": text,
+                "captured_contacts": captured,
+            }))
+        }
+        None => {
+            let title = format!("Unknown sender ({sender})");
+            let text = format!("Not in CRM.\n\"{body}\"{mentions}");
+            notify(&title, &text);
+            Ok(serde_json::json!({
+                "known": false,
+                "sender": sender,
+                "text": format!("{sender} not in CRM"),
+                "captured_contacts": captured,
+            }))
+        }
+    }
+}
+
+/// Scenario 3 — incoming-call context flash.
 pub async fn aware_call(crm: &AgentCrm, p: &serde_json::Value) -> Result<serde_json::Value> {
     let owner = strp(p, "owner")?;
     let number = strp(p, "number")?;

@@ -183,6 +183,7 @@ pub async fn dispatch(
                 "SMS" => InteractionKind::Sms,
                 "EMAIL" => InteractionKind::Email,
                 "MEETING" => InteractionKind::Meeting,
+                "MESSAGE" => InteractionKind::Message,
                 _ => InteractionKind::Note,
             };
             let direction = match str_param(p, "direction")
