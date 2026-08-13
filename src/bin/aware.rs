@@ -301,8 +301,7 @@ async fn resolve_by_name(
     // first token against the start of a CRM display name.
     let first_token = needle.split_whitespace().next().unwrap_or("");
     if let Some(c) = contacts.iter().find(|c| {
-        !first_token.is_empty()
-            && c.display_name().to_lowercase().starts_with(first_token)
+        !first_token.is_empty() && c.display_name().to_lowercase().starts_with(first_token)
     }) {
         return Ok(Some(c.clone()));
     }
@@ -366,6 +365,90 @@ pub async fn aware_whatsapp(crm: &AgentCrm, p: &serde_json::Value) -> Result<ser
             }))
         }
     }
+}
+
+/// Resolve a recipient for outbound WhatsApp by name or phone, forwarding the
+/// message through AutoTask's WebView bridge (`POST /v1/wa/send`). Logs the
+/// outbound interaction against the contact.
+pub async fn aware_whatsapp_send(
+    crm: &AgentCrm,
+    p: &serde_json::Value,
+) -> Result<serde_json::Value> {
+    let owner = strp(p, "owner")?;
+    let recipient = strp(p, "recipient")?;
+    let text = strp(p, "text")?;
+
+    // Resolve the recipient: try phone first, then by name (partial match).
+    let contact = if recipient.starts_with('+') {
+        crm.resolve_by_phone(owner, recipient).await?
+    } else {
+        resolve_by_name(crm, owner, recipient).await?
+    };
+
+    let (phone, name, contact_id) = match contact.as_ref() {
+        Some(c) => {
+            // Outbound via the bridge needs a full international number. Prefer
+            // the primary phone; fall back to an alt phone.
+            let number = c
+                .all_phones()
+                .into_iter()
+                .find(|n| n.starts_with('+'))
+                .unwrap_or_else(|| c.phone.clone());
+            (number, c.display_name(), Some(c.id.clone()))
+        }
+        None => {
+            // Unknown recipient: assume the string is a raw phone number.
+            let number = if recipient.starts_with('+') {
+                recipient.to_string()
+            } else {
+                return Err(agentcal::error::AgentError::ContactNotFound(
+                    recipient.to_string(),
+                ));
+            };
+            (number, recipient.to_string(), None)
+        }
+    };
+
+    if phone.is_empty() {
+        return Err(agentcal::error::AgentError::ContactNotFound(
+            recipient.to_string(),
+        ));
+    }
+
+    // Forward to AutoTask's WebView bridge on a background thread so the daemon
+    // never blocks (AutoTask's /v1/wa/send touches the WebView main thread; a
+    // synchronous call here would deadlock the RPC connection, exactly like the
+    // notify() path). We optimistically report dispatch; delivery is confirmed
+    // by the bridge's last_send_result / the informed notification.
+    let phone2 = phone.clone();
+    let text2 = text.to_string();
+    let body = serde_json::json!({ "phone": phone2, "text": text2 });
+    std::thread::spawn(move || {
+        let _ = autotask_post("/v1/wa/send", &body);
+    });
+    let ok = true;
+    let resp = "dispatched (async)".to_string();
+
+    // Log the outbound interaction against the known contact.
+    if let Some(cid) = &contact_id {
+        let _ = crm
+            .log_interaction(
+                owner,
+                InteractionInput::new(cid, InteractionKind::Message)
+                    .with_direction(InteractionDirection::Outbound)
+                    .with_summary(format!("WhatsApp: {text}")),
+            )
+            .await;
+    }
+
+    notify(&format!("WA sent → {name}"), text);
+    Ok(serde_json::json!({
+        "ok": ok,
+        "recipient": name,
+        "phone": phone,
+        "text": text,
+        "bridge_response": resp,
+    }))
 }
 
 /// Scenario 3 — incoming-call context flash.
