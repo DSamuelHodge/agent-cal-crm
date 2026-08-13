@@ -110,9 +110,11 @@ impl<T> IoResultExt<T> for T {
 }
 
 /// Minimal HTTPS GET via the engine's `/v1/http` proxy (preferred) or curl.
+/// The proxy path returns a raw HTTP response (status line + headers + body);
+/// strip the header block so callers get clean JSON/HTML.
 fn http_get(url: &str) -> std::io::Result<String> {
     if let Ok(r) = proxy_http("GET", url, None) {
-        return Ok(r);
+        return Ok(strip_http_headers(&r));
     }
     const TOOLS: [&str; 2] = [
         "/data/data/com.termux/files/usr/bin/curl", // phone (Termux)
@@ -698,29 +700,32 @@ pub async fn sync_logseq(crm: &AgentCrm, p: &serde_json::Value) -> Result<serde_
 
 /// Get the device's current GPS position via `termux-location`.
 fn current_position() -> Option<(f64, f64)> {
-    const TOOL: &str = "/data/data/com.termux/files/usr/bin/termux-location";
-    let out = std::process::Command::new(TOOL)
-        .env("HOME", "/data/data/com.termux/files/home")
-        .output()
-        .ok()?;
-    if !out.status.success() {
+    // The daemon runs inside AutoTask (no Termux, no location APIs of its
+    // own): ask the engine for its last known GPS fix over loopback.
+    let body = serde_json::json!({});
+    let resp = autotask_post("/v1/location", &body).ok()?;
+    let body_part = resp.split("\r\n\r\n").last().unwrap_or(&resp);
+    let v: serde_json::Value = serde_json::from_str(body_part).ok()?;
+    if !v.get("ok").and_then(|b| b.as_bool()).unwrap_or(false) {
         return None;
     }
-    let v: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
     let lat = v.get("latitude")?.as_f64()?;
     let lon = v.get("longitude")?.as_f64()?;
     Some((lat, lon))
 }
 
-/// Geocode an address string to (lat, lon) via Nominatim.
+/// Geocode an address string to (lat, lon). Nominatim blocks this device's
+/// network (403 policy), so we use Photon (komoot) — same response shape.
 fn geocode(address: &str) -> Option<(f64, f64)> {
     let q = urlencode(address);
-    let url = format!("https://nominatim.openstreetmap.org/search?format=json&limit=1&q={q}");
-    let text = http_get(&url).ok()?;
-    let v: serde_json::Value = serde_json::from_str(&text).ok()?;
-    let first = v.as_array()?.first()?;
-    let lat = first.get("lat")?.as_str()?.parse::<f64>().ok()?;
-    let lon = first.get("lon")?.as_str()?.parse::<f64>().ok()?;
+    let url = format!("https://photon.komoot.io/api/?limit=1&q={q}");
+    let text = proxy_http_ua("GET", &url, None).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&strip_http_headers(&text)).ok()?;
+    let first = v.get("features")?.as_array()?.first()?;
+    let geo = first.get("geometry")?;
+    let coords = geo.get("coordinates")?.as_array()?;
+    let lon = coords.first()?.as_f64()?;
+    let lat = coords.get(1)?.as_f64()?;
     Some((lat, lon))
 }
 
@@ -735,6 +740,11 @@ fn osrm_travel(o_lat: f64, o_lon: f64, d_lat: f64, d_lon: f64) -> Option<(f64, f
     let duration = route.get("duration")?.as_f64()?;
     let distance = route.get("distance")?.as_f64()?;
     Some((duration, distance))
+}
+
+/// Strip an HTTP response's status line + headers, returning only the body.
+fn strip_http_headers(resp: &str) -> String {
+    resp.split("\r\n\r\n").last().unwrap_or(resp).to_string()
 }
 
 fn urlencode(s: &str) -> String {
@@ -756,7 +766,12 @@ fn urlencode(s: &str) -> String {
 pub async fn aware_travel(_crm: &AgentCrm, p: &serde_json::Value) -> Result<serde_json::Value> {
     let dest = strp(p, "destination")?;
 
-    let origin = current_position();
+    // Optional explicit origin override (lat/lon) — useful when no live GPS
+    // fix is available (stationary phone / no cell scan).
+    let origin = match (f64p(p, "origin_lat"), f64p(p, "origin_lon")) {
+        (Some(lat), Some(lon)) => Some((lat, lon)),
+        _ => current_position(),
+    };
     let dest_coords = geocode(dest);
     match (origin, dest_coords) {
         (Some((olat, olon)), Some((dlat, dlon))) => match osrm_travel(olat, olon, dlat, dlon) {
@@ -1002,8 +1017,17 @@ pub async fn aware_search(_crm: &AgentCrm, p: &serde_json::Value) -> Result<serd
     let url = format!("https://html.duckduckgo.com/html/?q={q}");
 
     // Search engines bot-check requests without a browser User-Agent.
-    let html = proxy_http_ua("GET", &url, None)
+    let raw = proxy_http_ua("GET", &url, None)
         .map_err(|e| agentcal::AgentError::Validation(format!("search failed: {e}")))?;
+    let html = strip_http_headers(&raw);
+
+    // DDG intermittently rate-limits with an anomaly/challenge page.
+    if html.contains("anomaly") || html.contains("challenge") {
+        notify("Search", "DuckDuckGo is rate-limiting — try again shortly.");
+        return Ok(
+            serde_json::json!({ "query": query, "count": 0, "rate_limited": true, "results": [] }),
+        );
+    }
 
     let results = parse_ddg_html(&html);
     let title = format!("Search: {query}");
@@ -1018,7 +1042,9 @@ pub async fn aware_search(_crm: &AgentCrm, p: &serde_json::Value) -> Result<serd
             .join("\n")
     };
     notify(&title, &text);
-    Ok(serde_json::json!({ "query": query, "count": results.len(), "results": results.into_iter().take(5).collect::<Vec<_>>() }))
+    Ok(
+        serde_json::json!({ "query": query, "count": results.len(), "results": results.into_iter().take(5).collect::<Vec<_>>() }),
+    )
 }
 
 /// Scenario 10 — compose an email in the phone's Gmail app via a mailto: link
@@ -1028,7 +1054,11 @@ pub async fn aware_email(_crm: &AgentCrm, p: &serde_json::Value) -> Result<serde
     let to = strp(p, "to")?;
     let subject = strp(p, "subject").unwrap_or("");
     let body = strp(p, "body").unwrap_or("");
-    let mailto = format!("mailto:{to}?subject={}&body={}", urlencode(subject), urlencode(body));
+    let mailto = format!(
+        "mailto:{to}?subject={}&body={}",
+        urlencode(subject),
+        urlencode(body)
+    );
     let mailto2 = mailto.clone();
     std::thread::spawn(move || {
         let evt = serde_json::json!({
@@ -1047,7 +1077,11 @@ fn parse_ddg_html(html: &str) -> Vec<(String, String)> {
     let mut out = Vec::new();
     // Result blocks: <a rel="nofollow" class="result__a" href="...">Title</a>
     for block in html.split("result__a") {
-        let href = block.split("href=\"").nth(1).and_then(|s| s.split('"').next()).unwrap_or("");
+        let href = block
+            .split("href=\"")
+            .nth(1)
+            .and_then(|s| s.split('"').next())
+            .unwrap_or("");
         if href.is_empty() {
             continue;
         }
