@@ -96,3 +96,25 @@ adb forward tcp:8790 tcp:8790   # port forwarding is per-device-connection
 `cal.block`, `cal.create_link`, `cal.get_slots`, `cal.book`,
 `cal.get_booking`, `cal.list_bookings`, `cal.upcoming`, `cal.cancel`,
 `cal.summary`.
+
+## Cross-compile for Android (NDK) — Stage 1 of the re-architecture
+
+The daemon now cross-compiles to a native Android PIE executable (bionic,
+linked by `/system/bin/linker64`), verified running on-device standalone.
+
+```bash
+export JAVA_HOME=/opt/homebrew/opt/openjdk@17
+export PATH="$JAVA_HOME/bin:$PATH"
+export ANDROID_NDK_HOME=/opt/homebrew/share/android-commandlinetools/ndk/27.2.12479018
+rustup target add aarch64-linux-android
+cargo install cargo-ndk
+
+# Builds target/aarch64-linux-android/release/cos (the actual artifact;
+# cargo-ndk also copies .so libs to target/android/arm64-v8a/)
+cargo ndk -t arm64-v8a build --release --bin cos
+```
+
+Verified 2026-08-13: seeded a DB, served on 127.0.0.1:8899, and answered
+`aware.whatsapp.send` on-device via the NDK build. Next step (Stage 2) is
+bundling this binary into the AutoTask APK as `jniLibs/arm64-v8a/libcosd.so`
+with `extractNativeLibs=true` and spawning it via ProcessBuilder.
