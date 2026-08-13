@@ -163,37 +163,30 @@ pub fn notify(title: &str, text: &str) {
 
 // ── Scenario handlers ─────────────────────────────────────────────────────────
 
-/// A contact from the device's address book (`termux-contact-list`).
+/// A contact from the device's address book.
 struct DeviceContact {
     name: String,
     number: String,
 }
 
-/// Read the phone's contacts via `termux-contact-list` (Termux has
-/// READ_CONTACTS granted). Uses the absolute path because the daemon's PATH
-/// (started via `setsid` from a bare shell) is the Android default, not
-/// Termux's. Returns `None` if the tool is unavailable.
+/// Read the phone's contacts from the engine's `/v1/contacts` (the daemon has
+/// no ContactsContract access; the engine does via its READ_CONTACTS grant).
+/// Returns `None` if unavailable.
 fn device_contacts() -> Option<Vec<DeviceContact>> {
-    const TOOL: &str = "/data/data/com.termux/files/usr/bin/termux-contact-list";
-    let out = std::process::Command::new(TOOL)
-        .env("HOME", "/data/data/com.termux/files/home")
-        .output()
-        .ok()?;
-    if !out.status.success() {
+    let body = serde_json::json!({});
+    let resp = autotask_post("/v1/contacts", &body).ok()?;
+    let body_part = strip_http_headers(&resp);
+    let v: serde_json::Value = serde_json::from_str(&body_part).ok()?;
+    if !v.get("ok").and_then(|b| b.as_bool()).unwrap_or(false) {
         return None;
     }
-    let text = String::from_utf8_lossy(&out.stdout);
-    let v: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let contacts = v.get("contacts")?.as_array()?;
     Some(
-        v.as_array()?
+        contacts
             .iter()
             .filter_map(|c| {
                 let name = c.get("name")?.as_str()?.to_string();
-                let number = c
-                    .get("number")
-                    .and_then(|n| n.as_str())
-                    .unwrap_or("")
-                    .to_string();
+                let number = c.get("number").and_then(|n| n.as_str()).unwrap_or("").to_string();
                 if name.is_empty() {
                     None
                 } else {
