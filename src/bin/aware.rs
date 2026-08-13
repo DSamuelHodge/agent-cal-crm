@@ -289,11 +289,28 @@ async fn resolve_by_name(
     if needle.is_empty() {
         return Ok(None);
     }
-    Ok(crm
-        .list_contacts(owner)
-        .await?
-        .into_iter()
-        .find(|c| c.display_name().to_lowercase() == needle))
+    let contacts = crm.list_contacts(owner).await?;
+    // Exact display-name match first.
+    if let Some(c) = contacts
+        .iter()
+        .find(|c| c.display_name().to_lowercase() == needle)
+    {
+        return Ok(Some(c.clone()));
+    }
+    // WhatsApp titles are often a bare first name (or nickname); match the
+    // first token against the start of a CRM display name.
+    let first_token = needle.split_whitespace().next().unwrap_or("");
+    if let Some(c) = contacts.iter().find(|c| {
+        !first_token.is_empty()
+            && c.display_name().to_lowercase().starts_with(first_token)
+    }) {
+        return Ok(Some(c.clone()));
+    }
+    // Last resort: substring containment (e.g. "Mariam" vs "Mariam El Mezabi Wife").
+    Ok(contacts
+        .iter()
+        .find(|c| c.display_name().to_lowercase().contains(&needle))
+        .cloned())
 }
 
 /// Scenario 2 — WhatsApp message triage. WhatsApp notifications surface the
