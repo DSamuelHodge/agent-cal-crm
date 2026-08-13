@@ -66,6 +66,25 @@ fn proxy_http(
     autotask_post("/v1/http", &body)
 }
 
+/// Like `proxy_http` but with a browser User-Agent header — needed by search
+/// engines (DuckDuckGo returns a bot-check 202 otherwise).
+fn proxy_http_ua(
+    method: &str,
+    url: &str,
+    data: Option<&serde_json::Value>,
+) -> std::io::Result<String> {
+    let body = serde_json::json!({
+        "url": url,
+        "method": method,
+        "data": data,
+        "headers": {
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36",
+        },
+    });
+    autotask_post("/v1/http", &body)
+}
+
 /// Logseq API call with the empty-bearer auth the local server accepts.
 fn logseq_api(base: &str, method: &str, args: serde_json::Value) -> std::io::Result<String> {
     let body = serde_json::json!({ "method": method, "args": args });
@@ -889,6 +908,175 @@ pub async fn aware_deals(crm: &AgentCrm, p: &serde_json::Value) -> Result<serde_
         .join("\n");
     notify(&title, &text);
     Ok(serde_json::json!({ "count": open.len(), "text": text }))
+}
+
+/// Scenario 7 — outbound SMS via AutoTask's SEND_SMS action (MANUAL event).
+///
+/// AutoTask's SMS receiver + SEND_SMS grant give the engine a native send path,
+/// so we route through `/v1/events` (like notify). Dispatched on a detached
+/// thread to avoid the engine↔brain socket deadlock.
+pub async fn aware_sms_send(crm: &AgentCrm, p: &serde_json::Value) -> Result<serde_json::Value> {
+    let owner = strp(p, "owner")?;
+    let recipient = strp(p, "recipient")?;
+    let text = strp(p, "text")?;
+
+    let contact = if recipient.starts_with('+') {
+        crm.resolve_by_phone(owner, recipient).await?
+    } else {
+        resolve_by_name(crm, owner, recipient).await?
+    };
+    let (phone, name, contact_id) = match contact.as_ref() {
+        Some(c) => {
+            let number = c
+                .all_phones()
+                .into_iter()
+                .find(|n| n.starts_with('+'))
+                .unwrap_or_else(|| c.phone.clone());
+            (number, c.display_name(), Some(c.id.clone()))
+        }
+        None => {
+            let number = if recipient.starts_with('+') {
+                recipient.to_string()
+            } else {
+                return Err(agentcal::error::AgentError::ContactNotFound(
+                    recipient.to_string(),
+                ));
+            };
+            (number, recipient.to_string(), None)
+        }
+    };
+    if phone.is_empty() {
+        return Err(agentcal::error::AgentError::ContactNotFound(
+            recipient.to_string(),
+        ));
+    }
+
+    // Route through a MANUAL profile that executes the native SEND_SMS action.
+    let phone2 = phone.clone();
+    let text2 = text.to_string();
+    std::thread::spawn(move || {
+        let evt = serde_json::json!({
+            "triggerType": "MANUAL",
+            "profileId": "cos-sms-send",
+            "payload": { "number": phone2, "text": text2 },
+        });
+        let _ = autotask_post("/v1/events", &evt);
+    });
+
+    if let Some(cid) = &contact_id {
+        let _ = crm
+            .log_interaction(
+                owner,
+                InteractionInput::new(cid, InteractionKind::Sms)
+                    .with_direction(InteractionDirection::Outbound)
+                    .with_summary(format!("SMS: {text}")),
+            )
+            .await;
+    }
+    notify(&format!("SMS sent → {name}"), text);
+    Ok(serde_json::json!({ "ok": true, "recipient": name, "phone": phone, "text": text }))
+}
+
+/// Scenario 8 — open a URL in the phone's browser via OPEN_URL (MANUAL event).
+pub async fn aware_open(_crm: &AgentCrm, p: &serde_json::Value) -> Result<serde_json::Value> {
+    let url = strp(p, "url")?;
+    let url2 = url.to_string();
+    std::thread::spawn(move || {
+        let evt = serde_json::json!({
+            "triggerType": "MANUAL",
+            "profileId": "cos-open-url",
+            "payload": { "url": url2 },
+        });
+        let _ = autotask_post("/v1/events", &evt);
+    });
+    notify("Opened in browser", url);
+    Ok(serde_json::json!({ "ok": true, "url": url }))
+}
+
+/// Scenario 9 — web search via DuckDuckGo's HTML endpoint through the engine's
+/// `/v1/http` proxy. Returns the top few result titles + URLs (no permissions
+/// beyond INTERNET; parsing is done here in the brain).
+pub async fn aware_search(_crm: &AgentCrm, p: &serde_json::Value) -> Result<serde_json::Value> {
+    let query = strp(p, "query")?;
+    let q = urlencode(query);
+    let url = format!("https://html.duckduckgo.com/html/?q={q}");
+
+    // Search engines bot-check requests without a browser User-Agent.
+    let html = proxy_http_ua("GET", &url, None)
+        .map_err(|e| agentcal::AgentError::Validation(format!("search failed: {e}")))?;
+
+    let results = parse_ddg_html(&html);
+    let title = format!("Search: {query}");
+    let text = if results.is_empty() {
+        "No results".to_string()
+    } else {
+        results
+            .iter()
+            .take(4)
+            .map(|r| format!("• {} — {}", r.0, r.1))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    notify(&title, &text);
+    Ok(serde_json::json!({ "query": query, "count": results.len(), "results": results.into_iter().take(5).collect::<Vec<_>>() }))
+}
+
+/// Scenario 10 — compose an email in the phone's Gmail app via a mailto: link
+/// (OPEN_URL action). No OAuth needed for compose; reading the inbox is a
+/// separate future OAuth integration.
+pub async fn aware_email(_crm: &AgentCrm, p: &serde_json::Value) -> Result<serde_json::Value> {
+    let to = strp(p, "to")?;
+    let subject = strp(p, "subject").unwrap_or("");
+    let body = strp(p, "body").unwrap_or("");
+    let mailto = format!("mailto:{to}?subject={}&body={}", urlencode(subject), urlencode(body));
+    let mailto2 = mailto.clone();
+    std::thread::spawn(move || {
+        let evt = serde_json::json!({
+            "triggerType": "MANUAL",
+            "profileId": "cos-open-url",
+            "payload": { "url": mailto2 },
+        });
+        let _ = autotask_post("/v1/events", &evt);
+    });
+    notify("Email drafted", &format!("To: {to} — {subject}"));
+    Ok(serde_json::json!({ "ok": true, "to": to, "subject": subject, "mailto": mailto }))
+}
+
+/// Parse DuckDuckGo HTML search results into (title, url) pairs.
+fn parse_ddg_html(html: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    // Result blocks: <a rel="nofollow" class="result__a" href="...">Title</a>
+    for block in html.split("result__a") {
+        let href = block.split("href=\"").nth(1).and_then(|s| s.split('"').next()).unwrap_or("");
+        if href.is_empty() {
+            continue;
+        }
+        // The block after href starts with the title text until the next tag.
+        let title = block
+            .split(">")
+            .nth(1)
+            .and_then(|s| s.split('<').next())
+            .map(|s| strip_tags(s).trim().to_string())
+            .unwrap_or_default();
+        if !title.is_empty() {
+            out.push((title, href.to_string()));
+        }
+    }
+    out
+}
+
+fn strip_tags(s: &str) -> String {
+    let mut out = String::new();
+    let mut in_tag = false;
+    for c in s.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => out.push(c),
+            _ => {}
+        }
+    }
+    out
 }
 
 // ── small param helpers (binary-local) ────────────────────────────────────────
