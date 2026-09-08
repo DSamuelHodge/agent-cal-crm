@@ -46,7 +46,7 @@ pub use crm::{
     AgentCrm, Company, Contact, CrmSummary, Deal, DealStage, Interaction, InteractionDirection,
     InteractionInput, InteractionKind,
 };
-pub use error::{AgentError, Result, StoreError};
+pub use error::{AgentError, ErrorInfo, Result, StoreError, error_catalog, error_info};
 pub use inbox::{InboxEvent, InboxRecord, InboxStatus, IngestOutcome, IngestStatus};
 pub use scheduler::{Booked, Rescheduled, Summary};
 pub use store::{CalendarStore, LibSqlStore, MemoryStore, NullStore};

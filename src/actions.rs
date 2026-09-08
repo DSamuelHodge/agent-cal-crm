@@ -88,25 +88,13 @@ pub struct ActionLogEntry {
 
 /// Map an [`AgentError`] to a stable machine-readable code for the `result`
 /// column (agents branch on this instead of string-matching messages).
+///
+/// Single source of truth lives in [`crate::error::error_info`]: this is a
+/// thin accessor over `error_info(e).code` so the code strings cannot drift
+/// between the action log and the `error.catalog` RPC. The strings are
+/// STABILITY-PINNED by the `error_codes_stable` test — never rename one.
 pub fn error_code(e: &AgentError) -> &'static str {
-    match e {
-        AgentError::CalendarNotFound(_) => "calendar_not_found",
-        AgentError::CalendarAlreadyExists(_) => "calendar_already_exists",
-        AgentError::LinkNotFound(_) => "link_not_found",
-        AgentError::BookingNotFound(_) => "booking_not_found",
-        AgentError::Conflict(_) => "conflict",
-        AgentError::Validation(_) => "validation",
-        AgentError::AttendeeExists(_) => "attendee_exists",
-        AgentError::BookingFull => "booking_full",
-        AgentError::ContactNotFound(_) => "contact_not_found",
-        AgentError::CompanyNotFound(_) => "company_not_found",
-        AgentError::DealNotFound(_) => "deal_not_found",
-        AgentError::CrmValidation(_) => "crm_validation",
-        AgentError::ApprovalRequired(_) => "approval_required",
-        AgentError::ApprovalNotFound(_) => "approval_not_found",
-        AgentError::ApprovalNotApproved(_) => "approval_not_approved",
-        AgentError::Store(_) => "store_error",
-    }
+    crate::error::error_info(e).code
 }
 
 /// Value substituted for secret-looking param values.
