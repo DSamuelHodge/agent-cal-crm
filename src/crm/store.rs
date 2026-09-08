@@ -5,10 +5,13 @@ use async_trait::async_trait;
 
 use crate::actions::ActionLogStore;
 use crate::approvals::PendingApproval;
+use chrono::{DateTime, Utc};
+
 use crate::crm::types::{
     Company, Contact, CrmSummary, Deal, Interaction, InteractionDirection, InteractionKind,
 };
 use crate::error::Result;
+use crate::inbox::InboxRecord;
 
 /// Minimal interface every CRM store must implement.
 #[async_trait]
@@ -47,6 +50,28 @@ pub trait CrmStore: ActionLogStore {
     async fn resolve_by_email(&self, owner_id: &str, email: &str) -> Result<Option<Contact>>;
     /// List contacts belonging to a company.
     async fn contacts_for_company(&self, owner_id: &str, company_id: &str) -> Result<Vec<Contact>>;
+
+    // ── Inbox ──────────────────────────────────────────────────────────────
+    /// Insert an inbox record, ignoring the write when an event with the same
+    /// `(owner_id, channel, external_id)` is already filed. Returns `true`
+    /// when the row was inserted, `false` on a dedup conflict. Records are
+    /// immutable after insert — there is intentionally no update path.
+    async fn insert_inbox_event(&self, record: &InboxRecord) -> Result<bool>;
+    /// Load one inbox record by its dedup key.
+    async fn load_inbox_event(
+        &self,
+        owner_id: &str,
+        channel: &str,
+        external_id: &str,
+    ) -> Result<Option<InboxRecord>>;
+    /// List an owner's inbox records, newest first, optionally filtered by
+    /// channel, capped at `limit`.
+    async fn list_inbox_events(
+        &self,
+        owner_id: &str,
+        channel: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<InboxRecord>>;
 
     // ── Search ─────────────────────────────────────────────────────────────
     /// Full-text search over contacts + companies + deals (FTS5 where
@@ -142,6 +167,14 @@ pub struct InteractionInput {
     pub kind: InteractionKind,
     pub direction: InteractionDirection,
     pub summary: String,
+    /// Override the interaction timestamp (defaults to now when `None`).
+    /// Used by the inbox façade to file the event's own time, not the
+    /// filing time.
+    pub at: Option<DateTime<Utc>>,
+    /// Stored verbatim on the interaction (defaults to null). The inbox
+    /// façade stamps `inbox_channel` / `inbox_external_id` here so a filed
+    /// interaction traces back to its source event.
+    pub metadata: serde_json::Value,
 }
 
 impl InteractionInput {
@@ -152,6 +185,8 @@ impl InteractionInput {
             kind,
             direction: InteractionDirection::Outbound,
             summary: String::new(),
+            at: None,
+            metadata: serde_json::Value::Null,
         }
     }
 
@@ -167,6 +202,16 @@ impl InteractionInput {
 
     pub fn with_summary(mut self, summary: impl Into<String>) -> Self {
         self.summary = summary.into();
+        self
+    }
+
+    pub fn with_at(mut self, at: DateTime<Utc>) -> Self {
+        self.at = Some(at);
+        self
+    }
+
+    pub fn with_metadata(mut self, metadata: serde_json::Value) -> Self {
+        self.metadata = metadata;
         self
     }
 }

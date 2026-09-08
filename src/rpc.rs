@@ -18,6 +18,7 @@
 //! - `crm.create_deal`, `crm.get_deal`, `crm.list_deals`, `crm.list_deals_for_company`, `crm.advance_deal`
 //! - `crm.log_interaction`, `crm.interactions_for_contact`
 //! - `crm.attendee_for_contact`, `crm.contact_for_booking`
+//! - `inbox.ingest`, `inbox.list`
 //! - `cal.create_calendar_simple`, `cal.add_window`, `cal.block`
 //! - `cal.create_link`, `cal.get_slots`, `cal.book`
 //! - `cal.get_booking`, `cal.list_bookings`, `cal.upcoming`, `cal.cancel`, `cal.summary`
@@ -255,6 +256,49 @@ async fn dispatch_inner(
             let booking: crate::types::Booking = serde_json::from_value(p["booking"].clone())?;
             Ok(serde_json::to_value(
                 crm.contact_for_booking(owner(p)?, &booking).await?,
+            )?)
+        }
+
+        // ── Inbox: unified inbound ingestion ────────────────────────────────
+        "inbox.ingest" => {
+            let e = p
+                .get("event")
+                .ok_or_else(|| AgentError::Validation("missing param: event".into()))?;
+            let event = crate::inbox::InboxEvent {
+                channel: e
+                    .get("channel")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                external_id: e
+                    .get("external_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                from: e
+                    .get("from")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                body: e
+                    .get("body")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                at_ms: e
+                    .get("at_ms")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or_else(|| chrono::Utc::now().timestamp_millis()),
+            };
+            Ok(serde_json::to_value(
+                crate::inbox::ingest(crm, owner(p)?, event).await?,
+            )?)
+        }
+        "inbox.list" => {
+            let channel = p.get("channel").and_then(|v| v.as_str());
+            let limit = int_param(p, "limit").unwrap_or(20).min(200);
+            Ok(serde_json::to_value(
+                crate::inbox::list(crm, owner(p)?, channel, limit).await?,
             )?)
         }
 

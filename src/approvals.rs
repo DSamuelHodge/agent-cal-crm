@@ -356,7 +356,8 @@ pub fn action_log_clear() {
     }
 }
 
-fn log_decision(
+async fn log_decision(
+    store: &dyn crate::actions::ActionLogStore,
     owner_id: &str,
     actor: &str,
     rpc_method: &str,
@@ -368,9 +369,25 @@ fn log_decision(
         owner_id,
         actor,
         &format!("{rpc_method}({target_method})"),
-        params_json,
+        params_json.clone(),
         result,
     ));
+    // Mirror into the persistent action log (best-effort, never fails the
+    // call). `rpc:*` actors are RPC callers; `gate:*` actors are policy.
+    let actor_enum = if actor.starts_with("rpc:") {
+        crate::actions::ActionActor::Rpc
+    } else {
+        crate::actions::ActionActor::Rule
+    };
+    let _ = crate::actions::record_action(
+        store,
+        owner_id,
+        actor_enum,
+        &format!("{rpc_method}({target_method})"),
+        &params_json,
+        result,
+    )
+    .await;
 }
 
 // ── Business logic (lives here so `crm/agent.rs` stays untouched) ────────────
@@ -425,13 +442,15 @@ impl AgentCrm {
         }
         self.approval_store().save_approval(&approval).await?;
         log_decision(
+            self.action_store(),
             owner_id,
             actor,
             "approval.request",
             method,
             covered,
             &approval.state.clone(),
-        );
+        )
+        .await;
         Ok(approval)
     }
 
@@ -462,13 +481,15 @@ impl AgentCrm {
         approval.decided_at_ms = Some(now_ms());
         self.approval_store().save_approval(&approval).await?;
         log_decision(
+            self.action_store(),
             owner_id,
             actor,
             "approval.approve",
             &approval.method.clone(),
             approval.params_json.clone(),
             ApprovalState::Approved.as_str(),
-        );
+        )
+        .await;
         Ok(approval)
     }
 
@@ -503,13 +524,15 @@ impl AgentCrm {
             _ => ApprovalState::Rejected.as_str().to_string(),
         };
         log_decision(
+            self.action_store(),
             owner_id,
             actor,
             "approval.reject",
             &approval.method.clone(),
             approval.params_json.clone(),
             &result,
-        );
+        )
+        .await;
         Ok(approval)
     }
 

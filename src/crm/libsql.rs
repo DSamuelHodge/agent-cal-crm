@@ -15,6 +15,7 @@ use crate::crm::types::{
     InteractionDirection, InteractionKind,
 };
 use crate::error::{Result, StoreError};
+use crate::inbox::{InboxRecord, InboxStatus};
 use crate::store::LibSqlStore;
 
 // ── enum <-> str helpers ─────────────────────────────────────────────────────
@@ -196,6 +197,33 @@ fn decode_approval(row: &Row) -> Result<crate::approvals::PendingApproval> {
         created_at_ms: crate::store::get_int(row, 6)?,
         decided_at_ms: crate::store::get_opt_int(row, 7)?,
     })
+}
+
+fn decode_inbox(row: &Row) -> Result<InboxRecord> {
+    let status = match crate::store::get_text(row, 7)?.as_str() {
+        "UNKNOWN_SENDER" => InboxStatus::UnknownSender,
+        _ => InboxStatus::Ingested,
+    };
+    Ok(InboxRecord {
+        id: crate::store::get_text(row, 0)?,
+        owner_id: crate::store::get_text(row, 1)?,
+        channel: crate::store::get_text(row, 2)?,
+        external_id: crate::store::get_text(row, 3)?,
+        from: crate::store::get_text(row, 4)?,
+        body: crate::store::get_text(row, 5)?,
+        at: crate::store::get_dt(row, 6)?,
+        status,
+        contact_id: opt_id(&crate::store::get_text(row, 8)?),
+        interaction_id: opt_id(&crate::store::get_text(row, 9)?),
+        created_at: crate::store::get_dt(row, 10)?,
+    })
+}
+
+fn inbox_status_str(s: InboxStatus) -> &'static str {
+    match s {
+        InboxStatus::Ingested => "INGESTED",
+        InboxStatus::UnknownSender => "UNKNOWN_SENDER",
+    }
 }
 
 fn to_json(v: &serde_json::Value) -> String {
@@ -684,6 +712,99 @@ impl CrmStore for LibSqlStore {
         let mut out = Vec::new();
         while let Some(row) = rows.next().await.map_err(StoreError::from)? {
             out.push(decode_contact(&row)?);
+        }
+        Ok(out)
+    }
+
+    // ── Inbox ──────────────────────────────────────────────────────────────
+    async fn insert_inbox_event(&self, record: &InboxRecord) -> Result<bool> {
+        let conn = self.connection().lock().await;
+        let n = conn
+            .execute(
+                "INSERT OR IGNORE INTO inbox_events
+                 (id, owner_id, channel, external_id, sender, body, at, status,
+                  contact_id, interaction_id, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                params![
+                    record.id.as_str(),
+                    record.owner_id.as_str(),
+                    record.channel.as_str(),
+                    record.external_id.as_str(),
+                    record.from.as_str(),
+                    record.body.as_str(),
+                    record.at.to_rfc3339(),
+                    inbox_status_str(record.status),
+                    record.contact_id.as_deref().unwrap_or(""),
+                    record.interaction_id.as_deref().unwrap_or(""),
+                    record.created_at.to_rfc3339(),
+                ],
+            )
+            .await
+            .map_err(StoreError::from)?;
+        Ok(n > 0)
+    }
+
+    async fn load_inbox_event(
+        &self,
+        owner_id: &str,
+        channel: &str,
+        external_id: &str,
+    ) -> Result<Option<InboxRecord>> {
+        let conn = self.connection().lock().await;
+        let mut rows = conn
+            .query(
+                "SELECT id, owner_id, channel, external_id, sender, body, at, status,
+                        contact_id, interaction_id, created_at
+                 FROM inbox_events
+                 WHERE owner_id = ? AND channel = ? AND external_id = ?",
+                params![owner_id, channel, external_id],
+            )
+            .await
+            .map_err(StoreError::from)?;
+        match rows.next().await.map_err(StoreError::from)? {
+            Some(row) => Ok(Some(decode_inbox(&row)?)),
+            None => Ok(None),
+        }
+    }
+
+    async fn list_inbox_events(
+        &self,
+        owner_id: &str,
+        channel: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<InboxRecord>> {
+        let conn = self.connection().lock().await;
+        let mut out = Vec::new();
+        if let Some(channel) = channel {
+            let mut rows = conn
+                .query(
+                    "SELECT id, owner_id, channel, external_id, sender, body, at, status,
+                            contact_id, interaction_id, created_at
+                     FROM inbox_events
+                     WHERE owner_id = ? AND channel = ?
+                     ORDER BY at DESC, rowid DESC LIMIT ?",
+                    params![owner_id, channel, limit as i64],
+                )
+                .await
+                .map_err(StoreError::from)?;
+            while let Some(row) = rows.next().await.map_err(StoreError::from)? {
+                out.push(decode_inbox(&row)?);
+            }
+        } else {
+            let mut rows = conn
+                .query(
+                    "SELECT id, owner_id, channel, external_id, sender, body, at, status,
+                            contact_id, interaction_id, created_at
+                     FROM inbox_events
+                     WHERE owner_id = ?
+                     ORDER BY at DESC, rowid DESC LIMIT ?",
+                    params![owner_id, limit as i64],
+                )
+                .await
+                .map_err(StoreError::from)?;
+            while let Some(row) = rows.next().await.map_err(StoreError::from)? {
+                out.push(decode_inbox(&row)?);
+            }
         }
         Ok(out)
     }

@@ -5,7 +5,7 @@
 //! buffer is global, so log assertions filter by owner).
 
 use agentcal::approvals::{
-    self, action_log_clear, action_log_snapshot, ApprovalConfig, ApprovalState, RiskTier,
+    self, action_log_snapshot, ApprovalConfig, ApprovalState, RiskTier,
 };
 use agentcal::error::AgentError;
 use agentcal::rpc::dispatch;
@@ -163,7 +163,6 @@ fn tier_table_spot_checks() {
 #[tokio::test]
 async fn request_auto_approves_low_risk() {
     let (_dir, cal, crm, owner) = file_ctx("auto").await;
-    action_log_clear();
     let r = call(
         &cal,
         &crm,
@@ -219,7 +218,6 @@ async fn request_pends_sends_and_dedups() {
 #[tokio::test]
 async fn cancel_pending_approve_executes_end_to_end() {
     let (_dir, cal, crm, owner) = file_ctx("e2e").await;
-    action_log_clear();
     let (_link, bid_json) = setup_booking(&cal, &crm, &owner).await;
     let bid = bid_json.as_str().unwrap();
 
