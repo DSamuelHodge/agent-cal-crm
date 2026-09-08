@@ -27,6 +27,8 @@
 //!   (`cal.cancel` is approval-gated: it needs a valid `approval_id` param or
 //!   returns `ApprovalRequired`; see `crate::approvals`)
 //! - `approval.request`, `approval.approve`, `approval.reject`, `approval.list`
+//! - `sms.send`, `email.send` (budget-enforced, ledger-counted sends)
+//! - `limit.query` (send-budget reads)
 
 use crate::agent_api::{AgentCal, LinkParams};
 use crate::crm::agent::AgentCrm;
@@ -516,6 +518,68 @@ async fn dispatch_inner(
         // can pass a uniform param shape). Mirrors the `action_log.*` arm
         // style above: pure read, serialised via `serde_json::to_value`.
         "error.catalog" => Ok(serde_json::to_value(crate::error::error_catalog())?),
+        // ── Sends (Phase 2 deterministic budgets) ───────────────────────────
+        // `sms.send` / `email.send` are ledger-counted sends: params are
+        // validated first (failures consume no budget), the per-channel
+        // daily budget is enforced, and one unit of usage is recorded on
+        // success. Actual delivery lives in the `aware.*` binary paths.
+        "sms.send" | "email.send" => {
+            let channel = crate::limits::method_channel(method).ok_or_else(|| {
+                AgentError::Validation(format!("unknown send method: {method}"))
+            })?;
+            let budget = crate::limits::budget_for_channel(channel).ok_or_else(|| {
+                AgentError::Validation(format!("unknown channel: {channel}"))
+            })?;
+            let owner_id = owner(p)?;
+            let day = crate::limits::today_utc_day();
+            let used = crm.crm_store().usage(owner_id, channel, &day).await?;
+            if used >= budget {
+                return Err(AgentError::LimitExceeded(format!(
+                    "{channel} daily send budget exhausted ({used}/{budget} used); retry tomorrow"
+                )));
+            }
+            let recipient = str_param(p, "recipient")?;
+            let text = str_param(p, "text")?;
+            if recipient.is_empty() {
+                return Err(AgentError::Validation("recipient must not be empty".into()));
+            }
+            if text.is_empty() {
+                return Err(AgentError::Validation("text must not be empty".into()));
+            }
+            let new_used = crm.crm_store().record_use(owner_id, channel, &day).await?;
+            Ok(serde_json::json!({
+                "ok": true,
+                "channel": channel,
+                "day": day,
+                "used": new_used,
+                "budget": budget,
+                "recipient": recipient,
+                "text": text,
+            }))
+        }
+        // ── Send-budget reads ───────────────────────────────────────────────
+        "limit.query" => {
+            let owner_id = owner(p)?;
+            let channel = str_param(p, "channel")?;
+            let budget = crate::limits::budget_for_channel(channel).ok_or_else(|| {
+                AgentError::Validation(format!("unknown channel: {channel}"))
+            })?;
+            let day = match p.get("day").and_then(|v| v.as_str()) {
+                Some(d) => {
+                    if !crate::limits::is_valid_day(d) {
+                        return Err(AgentError::Validation(format!(
+                            "invalid day (expected YYYY-MM-DD): {d}"
+                        )));
+                    }
+                    d.to_string()
+                }
+                None => crate::limits::today_utc_day(),
+            };
+            let used = crm.crm_store().usage(owner_id, channel, &day).await?;
+            Ok(serde_json::to_value(crate::limits::LimitStatus::new(
+                channel, &day, used, budget,
+            ))?)
+        }
 
         other => Err(AgentError::Validation(format!(
             "unknown RPC method: {other}"

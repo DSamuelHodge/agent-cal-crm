@@ -217,6 +217,16 @@ CREATE TABLE IF NOT EXISTS pending_approvals (
 
 CREATE INDEX IF NOT EXISTS idx_approvals_owner ON pending_approvals(owner_id);
 CREATE INDEX IF NOT EXISTS idx_approvals_state ON pending_approvals(owner_id, state);
+
+-- ── Deterministic send budgets (Phase 2 limits ledger) ───────────────────────
+-- One counter row per (owner, channel, day); writers upsert-increment.
+CREATE TABLE IF NOT EXISTS limit_usage (
+    owner   TEXT NOT NULL,
+    channel TEXT NOT NULL,
+    day     TEXT NOT NULL,
+    used    INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (owner, channel, day)
+);
 "#;
 
 /// libSQL-backed [`CalendarStore`].

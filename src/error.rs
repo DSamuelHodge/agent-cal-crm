@@ -104,6 +104,9 @@ pub enum AgentError {
     #[error("approval {0}")]
     ApprovalNotApproved(String),
 
+    #[error("daily send budget exhausted: {0}")]
+    LimitExceeded(String),
+
     #[error(transparent)]
     Store(StoreError),
 }
@@ -245,6 +248,12 @@ pub fn error_info(e: &AgentError) -> ErrorInfo {
             meaning: "The approval is not in the approved state.",
             likely_cause: "Still pending, rejected, or expired; approve it with matching params, then retry.",
         },
+        AgentError::LimitExceeded(_) => ErrorInfo {
+            code: "limit_exceeded",
+            category: "user",
+            meaning: "The daily send budget for this channel is exhausted.",
+            likely_cause: "Too many sends today; low-risk agent traffic is capped per UTC day — retry tomorrow.",
+        },
         AgentError::Store(_) => ErrorInfo {
             code: "store_error",
             category: "internal",
@@ -299,6 +308,7 @@ pub fn error_catalog() -> Vec<ErrorInfo> {
             | AgentError::ApprovalRequired(_)
             | AgentError::ApprovalNotFound(_)
             | AgentError::ApprovalNotApproved(_)
+            | AgentError::LimitExceeded(_)
             | AgentError::Store(_) => {}
         }
     }
