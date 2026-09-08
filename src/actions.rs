@@ -105,6 +105,7 @@ pub fn error_code(e: &AgentError) -> &'static str {
         AgentError::ApprovalRequired(_) => "approval_required",
         AgentError::ApprovalNotFound(_) => "approval_not_found",
         AgentError::ApprovalNotApproved(_) => "approval_not_approved",
+        AgentError::ChannelDisabled(_) => "channel_disabled",
         AgentError::Store(_) => "store_error",
     }
 }

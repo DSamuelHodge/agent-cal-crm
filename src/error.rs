@@ -104,6 +104,9 @@ pub enum AgentError {
     #[error("approval {0}")]
     ApprovalNotApproved(String),
 
+    #[error("channel {0:?} is disabled (kill-switch)")]
+    ChannelDisabled(String),
+
     #[error(transparent)]
     Store(StoreError),
 }
