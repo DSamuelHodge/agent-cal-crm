@@ -104,6 +104,9 @@ pub enum AgentError {
     #[error("approval {0}")]
     ApprovalNotApproved(String),
 
+    #[error("daily send budget exhausted: {0}")]
+    LimitExceeded(String),
+
     #[error(transparent)]
     Store(StoreError),
 }

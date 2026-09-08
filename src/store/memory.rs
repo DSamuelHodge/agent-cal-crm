@@ -28,10 +28,16 @@ pub struct MemoryStore {
     approvals: Arc<Mutex<HashMap<String, PendingApproval>>>,
     /// Inbox ledger keyed by `owner_id\0channel\0external_id` (the dedup key).
     inbox: Arc<Mutex<HashMap<String, InboxRecord>>>,
+    /// Send-budget ledger keyed by `owner\0channel\0day` (UTC `YYYY-MM-DD`).
+    limits: Arc<Mutex<HashMap<String, u64>>>,
 }
 
 fn inbox_key(owner_id: &str, channel: &str, external_id: &str) -> String {
     format!("{owner_id}\0{channel}\0{external_id}")
+}
+
+fn limit_key(owner: &str, channel: &str, day: &str) -> String {
+    format!("{owner}\0{channel}\0{day}")
 }
 
 impl MemoryStore {
@@ -519,5 +525,18 @@ impl CrmStore for MemoryStore {
             }
         }
         Ok(n)
+    }
+
+    // ── Deterministic send budgets ───────────────────────────────────────
+    async fn record_use(&self, owner: &str, channel: &str, day: &str) -> Result<u64> {
+        let mut map = self.limits.lock().await;
+        let count = map.entry(limit_key(owner, channel, day)).or_insert(0);
+        *count += 1;
+        Ok(*count)
+    }
+
+    async fn usage(&self, owner: &str, channel: &str, day: &str) -> Result<u64> {
+        let map = self.limits.lock().await;
+        Ok(map.get(&limit_key(owner, channel, day)).copied().unwrap_or(0))
     }
 }

@@ -1115,6 +1115,46 @@ impl CrmStore for LibSqlStore {
             .map_err(StoreError::from)?;
         Ok(n as usize)
     }
+
+    // ── Deterministic send budgets ───────────────────────────────────────
+    async fn record_use(&self, owner: &str, channel: &str, day: &str) -> Result<u64> {
+        let conn = self.connection().lock().await;
+        conn.execute(
+            "INSERT INTO limit_usage (owner, channel, day, used) VALUES (?, ?, ?, 1)
+             ON CONFLICT(owner, channel, day) DO UPDATE SET used = used + 1",
+            params![owner, channel, day],
+        )
+        .await
+        .map_err(StoreError::from)?;
+        let mut rows = conn
+            .query(
+                "SELECT used FROM limit_usage WHERE owner = ? AND channel = ? AND day = ?",
+                params![owner, channel, day],
+            )
+            .await
+            .map_err(StoreError::from)?;
+        match rows.next().await.map_err(StoreError::from)? {
+            Some(row) => Ok(crate::store::get_int(&row, 0)?.max(0) as u64),
+            None => Err(crate::error::AgentError::Store(StoreError::Other(
+                "limit_usage row missing after upsert".into(),
+            ))),
+        }
+    }
+
+    async fn usage(&self, owner: &str, channel: &str, day: &str) -> Result<u64> {
+        let conn = self.connection().lock().await;
+        let mut rows = conn
+            .query(
+                "SELECT used FROM limit_usage WHERE owner = ? AND channel = ? AND day = ?",
+                params![owner, channel, day],
+            )
+            .await
+            .map_err(StoreError::from)?;
+        match rows.next().await.map_err(StoreError::from)? {
+            Some(row) => Ok(crate::store::get_int(&row, 0)?.max(0) as u64),
+            None => Ok(0),
+        }
+    }
 }
 
 // ── FTS helpers ──────────────────────────────────────────────────────────────

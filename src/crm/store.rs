@@ -111,6 +111,15 @@ pub trait CrmStore: ActionLogStore {
         now_ms: i64,
         ttl_ms: i64,
     ) -> Result<usize>;
+
+    // ── Deterministic send budgets (Phase 2 limits ledger) ─────────────────
+    /// Increment the `(owner, channel, day)` counter (inserting at 1 when
+    /// absent) and return the new count. `day` is a UTC calendar day
+    /// (`YYYY-MM-DD`); `channel` is `sms` or `email`.
+    async fn record_use(&self, owner: &str, channel: &str, day: &str) -> Result<u64>;
+    /// Read the `(owner, channel, day)` counter; `0` when nothing recorded.
+    /// Backs `limit.query`.
+    async fn usage(&self, owner: &str, channel: &str, day: &str) -> Result<u64>;
 }
 
 /// A single result from `search_crm`, tagged with its entity type.
