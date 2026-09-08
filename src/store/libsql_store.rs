@@ -6,6 +6,7 @@
 
 use std::path::Path;
 use std::sync::Arc;
+use std::env;
 
 use async_trait::async_trait;
 use chrono::{DateTime, TimeZone, Utc};
@@ -167,12 +168,226 @@ CREATE INDEX IF NOT EXISTS idx_deals_company    ON deals(company_id);
 CREATE INDEX IF NOT EXISTS idx_interactions_owner   ON interactions(owner_id);
 CREATE INDEX IF NOT EXISTS idx_interactions_contact ON interactions(contact_id);
 CREATE INDEX IF NOT EXISTS idx_contacts_embedding ON contacts (libsql_vector_idx(embedding));
+
+-- ── Chief of Staff data model (additive, from downloads/files 001-007) ────────
+-- DIMENSION 1: Principals — who has standing to speak/act for the owner.
+CREATE TABLE IF NOT EXISTS principals (
+  id                 TEXT PRIMARY KEY,
+  principal_type     TEXT NOT NULL CHECK (principal_type IN ('owner','delegate','agent','integration')),
+  display_name       TEXT NOT NULL,
+  default_authority  TEXT NOT NULL DEFAULT 'none' CHECK (default_authority IN ('full','limited','none')),
+  created_at         TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at         TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+INSERT OR IGNORE INTO principals (id, principal_type, display_name, default_authority) VALUES
+  ('derrick', 'owner', 'Derrick Hodge', 'full'),
+  ('agent',   'agent', 'Chief of Staff Agent', 'limited');
+
+-- DIMENSION 2: Entities — replaces `contacts` going forward (people/orgs/vendors/places).
+CREATE TABLE IF NOT EXISTS entities (
+  id                TEXT PRIMARY KEY,
+  owner_id          TEXT NOT NULL REFERENCES principals(id),
+  entity_type       TEXT NOT NULL CHECK (entity_type IN ('person','organization','vendor','place')),
+  display_name      TEXT NOT NULL,
+  first_name        TEXT,
+  last_name         TEXT,
+  organization_id   TEXT REFERENCES entities(id),
+  resolution_status TEXT NOT NULL DEFAULT 'unresolved'
+                    CHECK (resolution_status IN ('unresolved','resolved','merged')),
+  merged_into_id    TEXT REFERENCES entities(id),
+  is_self           INTEGER NOT NULL DEFAULT 0,
+  title             TEXT,
+  notes             TEXT,
+  metadata          TEXT DEFAULT 'null',
+  embedding         F32_BLOB(64),
+  source            TEXT NOT NULL DEFAULT 'owner_input',
+  confidence        REAL NOT NULL DEFAULT 1.0,
+  created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at        TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_entities_owner ON entities(owner_id);
+CREATE INDEX IF NOT EXISTS idx_entities_org ON entities(organization_id);
+CREATE INDEX IF NOT EXISTS idx_entities_resolution ON entities(resolution_status);
+CREATE INDEX IF NOT EXISTS idx_entities_embedding ON entities (libsql_vector_idx(embedding));
+
+CREATE TABLE IF NOT EXISTS entity_channels (
+  id                TEXT PRIMARY KEY,
+  entity_id         TEXT NOT NULL REFERENCES entities(id),
+  channel_type      TEXT NOT NULL CHECK (channel_type IN ('phone','email','sms','whatsapp','signal','other')),
+  value_raw         TEXT NOT NULL,
+  value_normalized  TEXT NOT NULL,
+  is_primary        INTEGER NOT NULL DEFAULT 0,
+  verified          INTEGER NOT NULL DEFAULT 0,
+  verified_at       TEXT,
+  created_at        TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_lookup ON entity_channels(channel_type, value_normalized);
+CREATE INDEX IF NOT EXISTS idx_channel_entity ON entity_channels(entity_id);
+
+CREATE TABLE IF NOT EXISTS entity_aliases (
+  id         TEXT PRIMARY KEY,
+  entity_id  TEXT NOT NULL REFERENCES entities(id),
+  alias      TEXT NOT NULL,
+  alias_type TEXT CHECK (alias_type IN ('nickname','honorific','maiden_name','former_org_name','other')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_aliases_entity ON entity_aliases(entity_id);
+
+CREATE TABLE IF NOT EXISTS entity_relationships (
+  id                 TEXT PRIMARY KEY,
+  entity_id          TEXT NOT NULL REFERENCES entities(id),
+  related_entity_id  TEXT NOT NULL REFERENCES entities(id),
+  relationship_type  TEXT NOT NULL,
+  is_mutual          INTEGER NOT NULL DEFAULT 1,
+  started_at         TEXT,
+  ended_at           TEXT,
+  notes              TEXT,
+  created_at         TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_relationships_entity ON entity_relationships(entity_id);
+CREATE INDEX IF NOT EXISTS idx_relationships_related ON entity_relationships(related_entity_id);
+
+-- DIMENSION 3: Provenance — who said/believed what, and how confident.
+CREATE TABLE IF NOT EXISTS audit_log (
+  id                       TEXT PRIMARY KEY,
+  table_name               TEXT NOT NULL,
+  record_id                TEXT NOT NULL,
+  field_name               TEXT,
+  old_value                TEXT,
+  new_value                TEXT,
+  source_type              TEXT NOT NULL CHECK (source_type IN (
+                              'owner_input',
+                              'delegate_input',
+                              'agent_inference',
+                              'contact_provided',
+                              'integration_sync'
+                            )),
+  source_detail            TEXT,
+  confidence               REAL NOT NULL DEFAULT 1.0,
+  changed_by_principal_id  TEXT REFERENCES principals(id),
+  created_at               TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_record ON audit_log(table_name, record_id);
+CREATE INDEX IF NOT EXISTS idx_audit_confidence ON audit_log(confidence);
+
+CREATE VIEW IF NOT EXISTS review_queue AS
+SELECT * FROM audit_log
+WHERE confidence < 0.7
+  AND source_type IN ('agent_inference', 'contact_provided', 'integration_sync')
+ORDER BY created_at DESC;
+
+-- DIMENSION 4: Trust & disclosure — IAM-style policies for a self-acting agent.
+CREATE TABLE IF NOT EXISTS access_policies (
+  id               TEXT PRIMARY KEY,
+  entity_id        TEXT REFERENCES entities(id),
+  channel_id       TEXT REFERENCES entity_channels(id),
+  policy_type      TEXT NOT NULL CHECK (policy_type IN (
+                     'call_gating', 'disclosure', 'action_authority', 'proxy_trust'
+                   )),
+  scope            TEXT NOT NULL DEFAULT 'all',
+  decision         TEXT NOT NULL CHECK (decision IN ('allow','block','escalate','digest_only')),
+  starts_at        TEXT NOT NULL DEFAULT (datetime('now')),
+  expires_at       TEXT,
+  granted_by_principal_id TEXT REFERENCES principals(id),
+  granted_via      TEXT NOT NULL CHECK (granted_via IN ('explicit','inferred','default_rule')),
+  confidence       REAL NOT NULL DEFAULT 1.0,
+  reason           TEXT,
+  created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at       TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_policy_entity ON access_policies(entity_id, policy_type);
+CREATE INDEX IF NOT EXISTS idx_policy_expiry ON access_policies(expires_at);
+
+-- DIMENSION 5: Engagement log — unified activity timeline (named `engagements`
+-- to avoid collision with the existing CRM `interactions` table).
+CREATE TABLE IF NOT EXISTS engagements (
+  id                 TEXT PRIMARY KEY,
+  owner_id           TEXT NOT NULL REFERENCES principals(id),
+  entity_id          TEXT REFERENCES entities(id),
+  channel_type       TEXT NOT NULL CHECK (channel_type IN ('call','sms','email','meeting','in_person','other')),
+  direction          TEXT NOT NULL CHECK (direction IN ('inbound','outbound')),
+  initiated_by       TEXT NOT NULL CHECK (initiated_by IN ('owner','agent','entity')),
+  was_autonomous     INTEGER NOT NULL DEFAULT 0,
+  policy_applied_id  TEXT REFERENCES access_policies(id),
+  summary            TEXT,
+  content            TEXT,
+  sentiment          TEXT,
+  project_id         TEXT REFERENCES projects(id),
+  occurred_at        TEXT NOT NULL DEFAULT (datetime('now')),
+  source             TEXT NOT NULL DEFAULT 'agent_inference',
+  confidence         REAL NOT NULL DEFAULT 1.0
+);
+
+CREATE INDEX IF NOT EXISTS idx_engagements_entity ON engagements(entity_id, occurred_at);
+CREATE INDEX IF NOT EXISTS idx_engagements_autonomous ON engagements(was_autonomous);
+CREATE INDEX IF NOT EXISTS idx_engagements_project ON engagements(project_id);
+
+-- DIMENSION 6: Open loops & projects.
+CREATE TABLE IF NOT EXISTS projects (
+  id           TEXT PRIMARY KEY,
+  owner_id     TEXT NOT NULL REFERENCES principals(id),
+  name         TEXT NOT NULL,
+  status       TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','on_hold','closed')),
+  description  TEXT,
+  started_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  target_date  TEXT,
+  closed_at    TEXT
+);
+
+CREATE TABLE IF NOT EXISTS commitments (
+  id                            TEXT PRIMARY KEY,
+  owner_id                      TEXT NOT NULL REFERENCES principals(id),
+  description                   TEXT NOT NULL,
+  direction                     TEXT NOT NULL CHECK (direction IN ('owed_by_owner','owed_to_owner')),
+  counterparty_entity_id        TEXT REFERENCES entities(id),
+  project_id                    TEXT REFERENCES projects(id),
+  status                        TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','waiting','done','cancelled')),
+  priority                      TEXT DEFAULT 'normal' CHECK (priority IN ('low','normal','high','urgent')),
+  due_at                        TEXT,
+  created_from_interaction_id   TEXT REFERENCES engagements(id),
+  created_at                    TEXT NOT NULL DEFAULT (datetime('now')),
+  resolved_at                   TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_commitments_status ON commitments(status, due_at);
+CREATE INDEX IF NOT EXISTS idx_commitments_counterparty ON commitments(counterparty_entity_id);
+CREATE INDEX IF NOT EXISTS idx_commitments_project ON commitments(project_id);
+
+-- DIMENSION 7: Relationship maintenance.
+CREATE TABLE IF NOT EXISTS relationship_care (
+  entity_id         TEXT PRIMARY KEY REFERENCES entities(id),
+  cadence_days      INTEGER,
+  last_contact_at   TEXT,
+  next_reminder_at  TEXT,
+  notes             TEXT
+);
+
+CREATE TABLE IF NOT EXISTS key_dates (
+  id          TEXT PRIMARY KEY,
+  entity_id   TEXT NOT NULL REFERENCES entities(id),
+  label       TEXT NOT NULL,
+  month       INTEGER NOT NULL,
+  day         INTEGER NOT NULL,
+  year        INTEGER,
+  recurrence  TEXT DEFAULT 'annual' CHECK (recurrence IN ('annual','once')),
+  notes       TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_keydates_entity ON key_dates(entity_id);
 "#;
 
 /// libSQL-backed [`CalendarStore`].
 #[derive(Clone)]
 pub struct LibSqlStore {
     conn: Arc<Mutex<Connection>>,
+    db: Option<Arc<libsql::Database>>,
 }
 
 impl LibSqlStore {
@@ -181,13 +396,31 @@ impl LibSqlStore {
         Self::open_with_builder(path).await
     }
 
-    /// Open via a [`libsql::Builder`] (local file).
+    /// Open via a [`libsql::Builder`].
+    ///
+    /// If `TURSO_URL` and `TURSO_TOKEN` are set, opens an embedded replica that
+    /// syncs bidirectionally with the Turso remote. Otherwise falls back to a
+    /// plain local file (unchanged behaviour).
     pub async fn open_with_builder(path: impl AsRef<Path>) -> Result<Self> {
-        let db = libsql::Builder::new_local(path.as_ref())
-            .build()
-            .await
-            .map_err(StoreError::from)?;
-        Self::init(db).await
+        let use_remote = env::var("TURSO_URL").is_ok() && env::var("TURSO_TOKEN").is_ok();
+        if use_remote {
+            let url = env::var("TURSO_URL").unwrap();
+            let token = env::var("TURSO_TOKEN").unwrap();
+            // Embedded replica expects an http(s) URL, not the libsql:// form.
+            let http_url = url.replace("libsql", "https");
+            let db = libsql::Builder::new_remote_replica(path.as_ref(), http_url, token)
+                .build()
+                .await
+                .map_err(StoreError::from)?;
+            let store = Self::init(db).await?;
+            Ok(store)
+        } else {
+            let db = libsql::Builder::new_local(path.as_ref())
+                .build()
+                .await
+                .map_err(StoreError::from)?;
+            Self::init(db).await
+        }
     }
 
     /// In-memory database (ephemeral — useful for tests).
@@ -204,6 +437,7 @@ impl LibSqlStore {
         conn.execute_batch(SCHEMA).await.map_err(StoreError::from)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
+            db: Some(Arc::new(db)),
         })
     }
 
@@ -215,6 +449,12 @@ impl LibSqlStore {
     /// Access to the underlying connection (used by the CRM store impl).
     pub(crate) fn connection(&self) -> &Arc<Mutex<Connection>> {
         &self.conn
+    }
+
+    /// Access to the underlying [`libsql::Database`], when one exists
+    /// (e.g. an embedded replica that needs periodic `sync()`).
+    pub fn database(&self) -> Option<&Arc<libsql::Database>> {
+        self.db.as_ref()
     }
 }
 

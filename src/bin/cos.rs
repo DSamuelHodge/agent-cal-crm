@@ -103,6 +103,13 @@ async fn seed(db: &str) {
 
 /// Run the HTTP daemon until killed.
 async fn serve(addr: &str, sock: Option<&str>, token: Option<&str>, db: &str) {
+    let turso_url = std::env::var("TURSO_URL").unwrap_or_default();
+    let ssl_file = std::env::var("SSL_CERT_FILE").unwrap_or_default();
+    eprintln!(
+        "[cos] serve db={db} turso_url_set={} ssl_cert_file={}",
+        !turso_url.is_empty(),
+        if ssl_file.is_empty() { "<unset>" } else { &ssl_file }
+    );
     let store = match LibSqlStore::open(PathBuf::from(db)).await {
         Ok(s) => s,
         Err(e) => {
@@ -111,7 +118,28 @@ async fn serve(addr: &str, sock: Option<&str>, token: Option<&str>, db: &str) {
         }
     };
     let cal = Arc::new(AgentCal::new(store.clone()));
-    let crm = Arc::new(AgentCrm::new(store));
+    let crm = Arc::new(AgentCrm::new(store.clone()));
+
+    // If the store is an embedded replica (Turso), keep it synced with the
+    // remote on a background interval. `store.database()` is None for plain
+    // local files, so this is a no-op in local-only deployments.
+    if let Some(db_handle) = store.database() {
+        let db_handle = db_handle.clone();
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Runtime::new().expect("sync runtime");
+            rt.block_on(async move {
+                let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
+                loop {
+                    interval.tick().await;
+                    match db_handle.sync().await {
+                        Ok(frame) => println!("turso sync ok: {frame:?}"),
+                        Err(e) => eprintln!("turso sync error: {e}"),
+                    }
+                }
+            });
+        });
+    }
+
     let token = token.map(|s| s.to_string());
 
     match sock {

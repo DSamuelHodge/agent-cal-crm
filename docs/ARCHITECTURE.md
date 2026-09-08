@@ -1,4 +1,5 @@
 # AutoTask + CoS — Re-engineered Architecture
+### Deprecated as of September 8, 2026
 
 > Internal team doc. Companion to the `architecture.html` overview page.
 
