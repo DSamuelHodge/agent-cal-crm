@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use tokio::sync::Mutex;
 
 use super::CalendarStore;
+use crate::approvals::PendingApproval;
 use crate::crm::store::{CrmStore, SearchHit};
 use crate::crm::types::{Company, Contact, CrmSummary, Deal, Interaction};
 use crate::error::Result;
@@ -21,6 +22,7 @@ pub struct MemoryStore {
     contacts: Arc<Mutex<HashMap<String, Contact>>>,
     deals: Arc<Mutex<HashMap<String, Deal>>>,
     interactions: Arc<Mutex<Vec<Interaction>>>,
+    approvals: Arc<Mutex<HashMap<String, PendingApproval>>>,
 }
 
 impl MemoryStore {
@@ -381,5 +383,64 @@ impl CrmStore for MemoryStore {
             .filter(|i| i.owner_id == owner_id)
             .count();
         Ok(s)
+    }
+
+    // ── Pending approvals ──────────────────────────────────────────────────
+    async fn save_approval(&self, approval: &PendingApproval) -> Result<()> {
+        self.approvals
+            .lock()
+            .await
+            .insert(approval.id.clone(), approval.clone());
+        Ok(())
+    }
+
+    async fn load_approval(
+        &self,
+        owner_id: &str,
+        approval_id: &str,
+    ) -> Result<Option<PendingApproval>> {
+        let map = self.approvals.lock().await;
+        Ok(map
+            .get(approval_id)
+            .filter(|a| a.owner_id == owner_id)
+            .cloned())
+    }
+
+    async fn list_approvals(
+        &self,
+        owner_id: &str,
+        state: Option<&str>,
+    ) -> Result<Vec<PendingApproval>> {
+        let map = self.approvals.lock().await;
+        let mut out: Vec<PendingApproval> = map
+            .values()
+            .filter(|a| a.owner_id == owner_id)
+            .filter(|a| state.map(|s| a.state == s).unwrap_or(true))
+            .cloned()
+            .collect();
+        out.sort_by(|a, b| b.created_at_ms.cmp(&a.created_at_ms));
+        Ok(out)
+    }
+
+    async fn expire_stale_approvals(
+        &self,
+        owner_id: &str,
+        now_ms: i64,
+        ttl_ms: i64,
+    ) -> Result<usize> {
+        let mut map = self.approvals.lock().await;
+        let cutoff = now_ms.saturating_sub(ttl_ms);
+        let mut n = 0;
+        for a in map.values_mut() {
+            if a.owner_id == owner_id
+                && a.state == crate::approvals::ApprovalState::Pending.as_str()
+                && a.created_at_ms < cutoff
+            {
+                a.state = crate::approvals::ApprovalState::Expired.as_str().to_string();
+                a.decided_at_ms = Some(now_ms);
+                n += 1;
+            }
+        }
+        Ok(n)
     }
 }

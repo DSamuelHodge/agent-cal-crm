@@ -167,6 +167,21 @@ CREATE INDEX IF NOT EXISTS idx_deals_company    ON deals(company_id);
 CREATE INDEX IF NOT EXISTS idx_interactions_owner   ON interactions(owner_id);
 CREATE INDEX IF NOT EXISTS idx_interactions_contact ON interactions(contact_id);
 CREATE INDEX IF NOT EXISTS idx_contacts_embedding ON contacts (libsql_vector_idx(embedding));
+
+-- ── Pending approvals (Phase 1 safety substrate) ─────────────────────────────
+CREATE TABLE IF NOT EXISTS pending_approvals (
+    id            TEXT PRIMARY KEY,
+    owner_id      TEXT NOT NULL,
+    method        TEXT NOT NULL,
+    params_json   TEXT NOT NULL DEFAULT '{}',
+    risk_tier     TEXT NOT NULL DEFAULT 'high',
+    state         TEXT NOT NULL DEFAULT 'pending',
+    created_at_ms INTEGER NOT NULL,
+    decided_at_ms INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_approvals_owner ON pending_approvals(owner_id);
+CREATE INDEX IF NOT EXISTS idx_approvals_state ON pending_approvals(owner_id, state);
 "#;
 
 /// libSQL-backed [`CalendarStore`].

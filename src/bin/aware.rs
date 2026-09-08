@@ -427,6 +427,15 @@ pub async fn aware_whatsapp_send(
     let recipient = strp(p, "recipient")?;
     let text = strp(p, "text")?;
 
+    // Approval gate (Phase 1): see `aware_sms_send`.
+    crm.check_send_allowed(
+        owner,
+        "aware.whatsapp.send",
+        p,
+        &agentcal::approvals::ApprovalConfig::from_env(),
+    )
+    .await?;
+
     // Resolve the recipient: try phone first, then by name (partial match).
     let contact = if recipient.starts_with('+') {
         crm.resolve_by_phone(owner, recipient).await?
@@ -928,6 +937,17 @@ pub async fn aware_sms_send(crm: &AgentCrm, p: &serde_json::Value) -> Result<ser
     let recipient = strp(p, "recipient")?;
     let text = strp(p, "text")?;
 
+    // Approval gate (Phase 1): sends wait for explicit approval. Without a
+    // valid `approval_id` param this enqueues a pending approval and returns
+    // `ApprovalRequired(approval_id)` before any side effect runs.
+    crm.check_send_allowed(
+        owner,
+        "aware.sms.send",
+        p,
+        &agentcal::approvals::ApprovalConfig::from_env(),
+    )
+    .await?;
+
     let contact = if recipient.starts_with('+') {
         crm.resolve_by_phone(owner, recipient).await?
     } else {
@@ -986,8 +1006,18 @@ pub async fn aware_sms_send(crm: &AgentCrm, p: &serde_json::Value) -> Result<ser
 }
 
 /// Scenario 8 — open a URL in the phone's browser via OPEN_URL (MANUAL event).
-pub async fn aware_open(_crm: &AgentCrm, p: &serde_json::Value) -> Result<serde_json::Value> {
+pub async fn aware_open(crm: &AgentCrm, p: &serde_json::Value) -> Result<serde_json::Value> {
+    let owner = strp(p, "owner")?;
     let url = strp(p, "url")?;
+    // Approval gate (Phase 1): opening a URL on the phone is an external side
+    // effect. See `aware_sms_send`.
+    crm.check_send_allowed(
+        owner,
+        "aware.open",
+        p,
+        &agentcal::approvals::ApprovalConfig::from_env(),
+    )
+    .await?;
     let url2 = url.to_string();
     std::thread::spawn(move || {
         let evt = serde_json::json!({
@@ -1043,10 +1073,20 @@ pub async fn aware_search(_crm: &AgentCrm, p: &serde_json::Value) -> Result<serd
 /// Scenario 10 — compose an email in the phone's Gmail app via a mailto: link
 /// (OPEN_URL action). No OAuth needed for compose; reading the inbox is a
 /// separate future OAuth integration.
-pub async fn aware_email(_crm: &AgentCrm, p: &serde_json::Value) -> Result<serde_json::Value> {
+pub async fn aware_email(crm: &AgentCrm, p: &serde_json::Value) -> Result<serde_json::Value> {
+    let owner = strp(p, "owner")?;
     let to = strp(p, "to")?;
     let subject = strp(p, "subject").unwrap_or("");
     let body = strp(p, "body").unwrap_or("");
+    // Approval gate (Phase 1): opening the Gmail compose view is an external
+    // side effect. See `aware_sms_send`.
+    crm.check_send_allowed(
+        owner,
+        "aware.email",
+        p,
+        &agentcal::approvals::ApprovalConfig::from_env(),
+    )
+    .await?;
     let mailto = format!(
         "mailto:{to}?subject={}&body={}",
         urlencode(subject),
@@ -1116,4 +1156,46 @@ fn strp<'a>(p: &'a serde_json::Value, key: &str) -> Result<&'a str> {
 
 fn f64p(p: &serde_json::Value, key: &str) -> Option<f64> {
     p.get(key).and_then(|v| v.as_f64())
+}
+
+#[cfg(test)]
+mod gate_tests {
+    use super::*;
+
+    async fn test_crm() -> AgentCrm {
+        let store = agentcal::LibSqlStore::in_memory().await.unwrap();
+        AgentCrm::new(store)
+    }
+
+    /// The approval gate sits before any side effect in the real send path:
+    /// no approval → `ApprovalRequired` (pending enqueued); approve → retry
+    /// with `approval_id` → executes. Bridge POSTs fail silently off-device
+    /// (`let _ = autotask_post(...)`), so this is hermetic.
+    #[tokio::test]
+    async fn sms_send_pending_approve_executes() {
+        let crm = test_crm().await;
+        let base = serde_json::json!({
+            "owner": "bin_owner",
+            "recipient": "+15551234567",
+            "text": "hello from gate test",
+        });
+        let err = aware_sms_send(&crm, &base).await.unwrap_err();
+        let id = match err {
+            agentcal::AgentError::ApprovalRequired(id) => id,
+            other => panic!("expected ApprovalRequired, got: {other}"),
+        };
+        crm.approve_approval(
+            "bin_owner",
+            &id,
+            "test",
+            &agentcal::approvals::ApprovalConfig::default(),
+        )
+        .await
+        .unwrap();
+        let mut exec = base.clone();
+        exec["approval_id"] = serde_json::json!(id);
+        let out = aware_sms_send(&crm, &exec).await.unwrap();
+        assert_eq!(out["phone"], "+15551234567");
+        assert_eq!(out["text"], "hello from gate test");
+    }
 }

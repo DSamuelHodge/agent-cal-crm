@@ -95,6 +95,15 @@ pub enum AgentError {
     #[error("crm validation: {0}")]
     CrmValidation(String),
 
+    #[error("approval required: {0}")]
+    ApprovalRequired(String),
+
+    #[error("approval {0:?} not found")]
+    ApprovalNotFound(String),
+
+    #[error("approval {0}")]
+    ApprovalNotApproved(String),
+
     #[error(transparent)]
     Store(StoreError),
 }
