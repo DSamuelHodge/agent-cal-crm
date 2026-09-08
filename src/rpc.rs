@@ -23,6 +23,7 @@
 //! - `cal.create_link`, `cal.get_slots`, `cal.book`
 //! - `cal.get_booking`, `cal.list_bookings`, `cal.upcoming`, `cal.cancel`, `cal.summary`
 //! - `action_log.list`, `action_log.query`
+//! - `error.catalog` (no params; `owner` accepted but ignored)
 //!   (`cal.cancel` is approval-gated: it needs a valid `approval_id` param or
 //!   returns `ApprovalRequired`; see `crate::approvals`)
 //! - `approval.request`, `approval.approve`, `approval.reject`, `approval.list`
@@ -509,6 +510,12 @@ async fn dispatch_inner(
                 .await?;
             Ok(serde_json::to_value(approvals)?)
         }
+
+        // ── Error catalog (Phase 2.1 central taxonomy) ───────────────────
+        // No params; `owner` accepted but ignored (kept optional so callers
+        // can pass a uniform param shape). Mirrors the `action_log.*` arm
+        // style above: pure read, serialised via `serde_json::to_value`.
+        "error.catalog" => Ok(serde_json::to_value(crate::error::error_catalog())?),
 
         other => Err(AgentError::Validation(format!(
             "unknown RPC method: {other}"
