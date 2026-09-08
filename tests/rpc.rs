@@ -209,17 +209,31 @@ async fn calendar_flow_via_rpc() {
     .unwrap();
     assert_eq!(upcoming.as_array().unwrap().len(), 1);
 
-    // cancel
+    // cancel is approval-gated (Phase 1): first attempt refuses with the
+    // pending approval id; approve, then retry with `approval_id`.
+    let cancel_base = serde_json::json!({
+        "owner": "derrick", "booking_id": bid, "reason": "rescheduled"
+    });
+    let err = call(&cal, &crm, "cal.cancel", cancel_base.clone())
+        .await
+        .unwrap_err();
+    let approval_id = match err {
+        agentcal::AgentError::ApprovalRequired(id) => id,
+        other => panic!("expected ApprovalRequired, got: {other}"),
+    };
     call(
         &cal,
         &crm,
-        "cal.cancel",
+        "approval.approve",
         serde_json::json!({
-            "owner": "derrick", "booking_id": bid, "reason": "rescheduled"
+            "owner": "derrick", "id": approval_id
         }),
     )
     .await
     .unwrap();
+    let mut cancel_exec = cancel_base.clone();
+    cancel_exec["approval_id"] = serde_json::json!(approval_id);
+    call(&cal, &crm, "cal.cancel", cancel_exec).await.unwrap();
     let upcoming = call(
         &cal,
         &crm,

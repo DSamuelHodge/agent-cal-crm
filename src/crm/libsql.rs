@@ -185,6 +185,19 @@ fn decode_interaction(row: &Row) -> Result<Interaction> {
     })
 }
 
+fn decode_approval(row: &Row) -> Result<crate::approvals::PendingApproval> {
+    Ok(crate::approvals::PendingApproval {
+        id: crate::store::get_text(row, 0)?,
+        owner_id: crate::store::get_text(row, 1)?,
+        method: crate::store::get_text(row, 2)?,
+        params_json: crate::store::get_json(row, 3)?,
+        risk_tier: crate::store::get_text(row, 4)?,
+        state: crate::store::get_text(row, 5)?,
+        created_at_ms: crate::store::get_int(row, 6)?,
+        decided_at_ms: crate::store::get_opt_int(row, 7)?,
+    })
+}
+
 fn to_json(v: &serde_json::Value) -> String {
     serde_json::to_string(v).unwrap_or_else(|_| "null".to_string())
 }
@@ -875,6 +888,111 @@ impl CrmStore for LibSqlStore {
         }
 
         Ok(s)
+    }
+
+    // ── Pending approvals ──────────────────────────────────────────────────
+    async fn save_approval(&self, approval: &crate::approvals::PendingApproval) -> Result<()> {
+        let conn = self.connection().lock().await;
+        conn.execute(
+            "INSERT INTO pending_approvals
+             (id, owner_id, method, params_json, risk_tier, state, created_at_ms, decided_at_ms)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET
+               owner_id=excluded.owner_id, method=excluded.method,
+               params_json=excluded.params_json, risk_tier=excluded.risk_tier,
+               state=excluded.state, created_at_ms=excluded.created_at_ms,
+               decided_at_ms=excluded.decided_at_ms",
+            params![
+                approval.id.as_str(),
+                approval.owner_id.as_str(),
+                approval.method.as_str(),
+                to_json(&approval.params_json),
+                approval.risk_tier.as_str(),
+                approval.state.as_str(),
+                approval.created_at_ms,
+                approval.decided_at_ms,
+            ],
+        )
+        .await
+        .map_err(StoreError::from)?;
+        Ok(())
+    }
+
+    async fn load_approval(
+        &self,
+        owner_id: &str,
+        approval_id: &str,
+    ) -> Result<Option<crate::approvals::PendingApproval>> {
+        let conn = self.connection().lock().await;
+        let mut rows = conn
+            .query(
+                "SELECT id, owner_id, method, params_json, risk_tier, state,
+                        created_at_ms, decided_at_ms
+                 FROM pending_approvals WHERE id = ? AND owner_id = ?",
+                params![approval_id, owner_id],
+            )
+            .await
+            .map_err(StoreError::from)?;
+        match rows.next().await.map_err(StoreError::from)? {
+            Some(row) => Ok(Some(decode_approval(&row)?)),
+            None => Ok(None),
+        }
+    }
+
+    async fn list_approvals(
+        &self,
+        owner_id: &str,
+        state: Option<&str>,
+    ) -> Result<Vec<crate::approvals::PendingApproval>> {
+        let conn = self.connection().lock().await;
+        let mut rows = match state {
+            Some(s) => {
+                conn.query(
+                    "SELECT id, owner_id, method, params_json, risk_tier, state,
+                            created_at_ms, decided_at_ms
+                     FROM pending_approvals WHERE owner_id = ? AND state = ?
+                     ORDER BY created_at_ms DESC",
+                    params![owner_id, s],
+                )
+                .await
+                .map_err(StoreError::from)?
+            }
+            None => {
+                conn.query(
+                    "SELECT id, owner_id, method, params_json, risk_tier, state,
+                            created_at_ms, decided_at_ms
+                     FROM pending_approvals WHERE owner_id = ?
+                     ORDER BY created_at_ms DESC",
+                    params![owner_id],
+                )
+                .await
+                .map_err(StoreError::from)?
+            }
+        };
+        let mut out = Vec::new();
+        while let Some(row) = rows.next().await.map_err(StoreError::from)? {
+            out.push(decode_approval(&row)?);
+        }
+        Ok(out)
+    }
+
+    async fn expire_stale_approvals(
+        &self,
+        owner_id: &str,
+        now_ms: i64,
+        ttl_ms: i64,
+    ) -> Result<usize> {
+        let conn = self.connection().lock().await;
+        let cutoff = now_ms.saturating_sub(ttl_ms);
+        let n = conn
+            .execute(
+                "UPDATE pending_approvals SET state = 'expired', decided_at_ms = ?
+                 WHERE owner_id = ? AND state = 'pending' AND created_at_ms < ?",
+                params![now_ms, owner_id, cutoff],
+            )
+            .await
+            .map_err(StoreError::from)?;
+        Ok(n as usize)
     }
 }
 

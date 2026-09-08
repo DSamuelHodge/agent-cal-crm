@@ -4,6 +4,7 @@
 use async_trait::async_trait;
 
 use crate::actions::ActionLogStore;
+use crate::approvals::PendingApproval;
 use crate::crm::types::{
     Company, Contact, CrmSummary, Deal, Interaction, InteractionDirection, InteractionKind,
 };
@@ -62,6 +63,29 @@ pub trait CrmStore: ActionLogStore {
 
     // ── Summary ────────────────────────────────────────────────────────────
     async fn crm_summary(&self, owner_id: &str) -> Result<CrmSummary>;
+
+    // ── Pending approvals (Phase 1 safety substrate) ───────────────────────
+    async fn save_approval(&self, approval: &PendingApproval) -> Result<()>;
+    async fn load_approval(
+        &self,
+        owner_id: &str,
+        approval_id: &str,
+    ) -> Result<Option<PendingApproval>>;
+    /// List approvals for `owner_id`, newest first; `state` filters to one of
+    /// `pending|approved|rejected|expired` when `Some`.
+    async fn list_approvals(
+        &self,
+        owner_id: &str,
+        state: Option<&str>,
+    ) -> Result<Vec<PendingApproval>>;
+    /// Mark `pending` rows older than `ttl_ms` (relative to `now_ms`) as
+    /// `expired`. Returns the number of rows transitioned.
+    async fn expire_stale_approvals(
+        &self,
+        owner_id: &str,
+        now_ms: i64,
+        ttl_ms: i64,
+    ) -> Result<usize>;
 }
 
 /// A single result from `search_crm`, tagged with its entity type.

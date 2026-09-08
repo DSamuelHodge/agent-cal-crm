@@ -182,6 +182,21 @@ CREATE TABLE IF NOT EXISTS action_log (
 
 CREATE INDEX IF NOT EXISTS idx_action_log_owner  ON action_log(owner_id, at_ms);
 CREATE INDEX IF NOT EXISTS idx_action_log_method ON action_log(owner_id, method, at_ms);
+
+-- ── Pending approvals (Phase 1 safety substrate) ─────────────────────────────
+CREATE TABLE IF NOT EXISTS pending_approvals (
+    id            TEXT PRIMARY KEY,
+    owner_id      TEXT NOT NULL,
+    method        TEXT NOT NULL,
+    params_json   TEXT NOT NULL DEFAULT '{}',
+    risk_tier     TEXT NOT NULL DEFAULT 'high',
+    state         TEXT NOT NULL DEFAULT 'pending',
+    created_at_ms INTEGER NOT NULL,
+    decided_at_ms INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_approvals_owner ON pending_approvals(owner_id);
+CREATE INDEX IF NOT EXISTS idx_approvals_state ON pending_approvals(owner_id, state);
 "#;
 
 /// libSQL-backed [`CalendarStore`].

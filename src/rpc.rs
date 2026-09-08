@@ -22,6 +22,9 @@
 //! - `cal.create_link`, `cal.get_slots`, `cal.book`
 //! - `cal.get_booking`, `cal.list_bookings`, `cal.upcoming`, `cal.cancel`, `cal.summary`
 //! - `action_log.list`, `action_log.query`
+//!   (`cal.cancel` is approval-gated: it needs a valid `approval_id` param or
+//!   returns `ApprovalRequired`; see `crate::approvals`)
+//! - `approval.request`, `approval.approve`, `approval.reject`, `approval.list`
 
 use crate::agent_api::{AgentCal, LinkParams};
 use crate::crm::agent::AgentCrm;
@@ -372,14 +375,28 @@ async fn dispatch_inner(
             cal.upcoming(owner(p)?, int_param(p, "limit").unwrap_or(10))
                 .await?,
         )?),
-        "cal.cancel" => Ok(serde_json::to_value(
-            cal.cancel(
+        "cal.cancel" => {
+            // Destructive lib method: gated behind an approval. Without a valid
+            // `approval_id` param this enqueues (or reuses) a pending approval
+            // and returns `ApprovalRequired(approval_id)`; the caller approves
+            // via `approval.approve` and retries with the same params plus
+            // `approval_id`.
+            crm.check_send_allowed(
                 owner(p)?,
-                str_param(p, "booking_id")?,
-                str_param(p, "reason").unwrap_or(""),
+                "cal.cancel",
+                p,
+                &crate::approvals::ApprovalConfig::from_env(),
             )
-            .await?,
-        )?),
+            .await?;
+            Ok(serde_json::to_value(
+                cal.cancel(
+                    owner(p)?,
+                    str_param(p, "booking_id")?,
+                    str_param(p, "reason").unwrap_or(""),
+                )
+                .await?,
+            )?)
+        }
         "cal.summary" => Ok(serde_json::to_value(cal.summary(owner(p)?).await?)?),
 
         // ── Action log ──────────────────────────────────────────────────
@@ -397,6 +414,56 @@ async fn dispatch_inner(
                     .query_actions(owner(p)?, filter, limit)
                     .await?,
             )?)
+        }
+        // ── Approvals (Phase 1 safety substrate) ──────────────────────────
+        "approval.request" => {
+            let method = str_param(p, "method")?;
+            let inner = p.get("params").cloned().unwrap_or(serde_json::Value::Null);
+            let approval = crm
+                .request_approval(
+                    owner(p)?,
+                    method,
+                    &inner,
+                    "rpc:approval.request",
+                    &crate::approvals::ApprovalConfig::from_env(),
+                )
+                .await?;
+            Ok(serde_json::to_value(approval)?)
+        }
+        "approval.approve" => {
+            let approval = crm
+                .approve_approval(
+                    owner(p)?,
+                    str_param(p, "id")?,
+                    "rpc:approval.approve",
+                    &crate::approvals::ApprovalConfig::from_env(),
+                )
+                .await?;
+            Ok(serde_json::to_value(approval)?)
+        }
+        "approval.reject" => {
+            let reason = p.get("reason").and_then(|v| v.as_str());
+            let approval = crm
+                .reject_approval(
+                    owner(p)?,
+                    str_param(p, "id")?,
+                    "rpc:approval.reject",
+                    reason,
+                    &crate::approvals::ApprovalConfig::from_env(),
+                )
+                .await?;
+            Ok(serde_json::to_value(approval)?)
+        }
+        "approval.list" => {
+            let state = p.get("state").and_then(|v| v.as_str());
+            let approvals = crm
+                .list_approvals(
+                    owner(p)?,
+                    state,
+                    &crate::approvals::ApprovalConfig::from_env(),
+                )
+                .await?;
+            Ok(serde_json::to_value(approvals)?)
         }
 
         other => Err(AgentError::Validation(format!(

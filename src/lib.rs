@@ -27,6 +27,7 @@
 
 pub mod agent_api;
 pub mod actions;
+pub mod approvals;
 pub mod availability;
 pub mod crm;
 pub mod error;
@@ -38,6 +39,7 @@ pub mod types;
 
 pub use agent_api::{AgentCal, LinkParams};
 pub use actions::{record_action, ActionActor, ActionLogEntry, ActionLogStore};
+pub use approvals::{ApprovalConfig, ApprovalState, PendingApproval, RiskTier};
 pub use availability::CheckResult;
 pub use crm::{
     AgentCrm, Company, Contact, CrmSummary, Deal, DealStage, Interaction, InteractionDirection,

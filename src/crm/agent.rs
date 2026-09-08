@@ -38,6 +38,12 @@ impl AgentCrm {
         &*self.store
     }
 
+    /// Borrow the underlying store (crate-internal; used by the approvals gate
+    /// in `crate::approvals` so `crm/agent.rs` itself stays untouched).
+    pub(crate) fn crm_store(&self) -> &Arc<dyn CrmStore> {
+        &self.store
+    }
+
     // ── Companies ──────────────────────────────────────────────────────────
 
     pub async fn create_company(

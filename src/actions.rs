@@ -102,6 +102,9 @@ pub fn error_code(e: &AgentError) -> &'static str {
         AgentError::CompanyNotFound(_) => "company_not_found",
         AgentError::DealNotFound(_) => "deal_not_found",
         AgentError::CrmValidation(_) => "crm_validation",
+        AgentError::ApprovalRequired(_) => "approval_required",
+        AgentError::ApprovalNotFound(_) => "approval_not_found",
+        AgentError::ApprovalNotApproved(_) => "approval_not_approved",
         AgentError::Store(_) => "store_error",
     }
 }
