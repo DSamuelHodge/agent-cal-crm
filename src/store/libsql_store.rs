@@ -157,6 +157,26 @@ CREATE VIRTUAL TABLE IF NOT EXISTS crm_fts USING fts5(
     owner_id UNINDEXED, entity, id UNINDEXED, label, snippet
 );
 
+-- ── Inbox (unified inbound ledger) ─────────────────────────────────────────
+-- Exactly-once per (owner_id, channel, external_id) via the unique index;
+-- writers use INSERT OR IGNORE and treat "ignored" as a duplicate delivery.
+CREATE TABLE IF NOT EXISTS inbox_events (
+    id             TEXT PRIMARY KEY,
+    owner_id       TEXT NOT NULL,
+    channel        TEXT NOT NULL,
+    external_id    TEXT NOT NULL,
+    sender         TEXT NOT NULL DEFAULT '',
+    body           TEXT NOT NULL DEFAULT '',
+    at             TEXT NOT NULL,
+    status         TEXT NOT NULL DEFAULT 'INGESTED',
+    contact_id     TEXT,
+    interaction_id TEXT,
+    created_at     TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_inbox_dedup ON inbox_events(owner_id, channel, external_id);
+CREATE INDEX IF NOT EXISTS idx_inbox_owner ON inbox_events(owner_id);
+
 CREATE INDEX IF NOT EXISTS idx_companies_owner  ON companies(owner_id);
 CREATE INDEX IF NOT EXISTS idx_contacts_owner   ON contacts(owner_id);
 CREATE INDEX IF NOT EXISTS idx_contacts_company ON contacts(company_id);

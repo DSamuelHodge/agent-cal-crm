@@ -187,7 +187,7 @@ impl AgentCrm {
         input: InteractionInput,
     ) -> Result<Interaction> {
         self.get_contact(owner_id, &input.contact_id).await?;
-        let interaction = Interaction::new(
+        let mut interaction = Interaction::new(
             owner_id,
             &input.contact_id,
             input.kind,
@@ -195,6 +195,12 @@ impl AgentCrm {
             &input.summary,
         )
         .let_deal(input.deal_id);
+        if let Some(at) = input.at {
+            interaction.at = at;
+        }
+        if !input.metadata.is_null() {
+            interaction.metadata = input.metadata;
+        }
         self.store.save_interaction(&interaction).await?;
         Ok(interaction)
     }
@@ -206,6 +212,48 @@ impl AgentCrm {
     ) -> Result<Vec<Interaction>> {
         self.store
             .list_interactions_for_contact(owner_id, contact_id)
+            .await
+    }
+
+    // ── Inbox ────────────────────────────────────────────────────────────
+    // Thin wrappers over the store ledger; the orchestration (resolve →
+    // file → dedup) lives in `crate::inbox` so there is exactly one
+    // ingestion path.
+
+    /// File one inbound event (see `crate::inbox::ingest`).
+    pub async fn ingest_inbox_event(
+        &self,
+        owner_id: &str,
+        event: crate::inbox::InboxEvent,
+    ) -> Result<crate::inbox::IngestOutcome> {
+        crate::inbox::ingest(self, owner_id, event).await
+    }
+
+    /// List filed inbox records, newest first.
+    pub async fn list_inbox_events(
+        &self,
+        owner_id: &str,
+        channel: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<crate::inbox::InboxRecord>> {
+        self.store.list_inbox_events(owner_id, channel, limit).await
+    }
+
+    /// Insert-or-ignore one inbox record (dedup on
+    /// `(owner_id, channel, external_id)`). Used by `crate::inbox::ingest`.
+    pub async fn insert_inbox_event(&self, record: &crate::inbox::InboxRecord) -> Result<bool> {
+        self.store.insert_inbox_event(record).await
+    }
+
+    /// Load one inbox record by its dedup key. Used by `crate::inbox::ingest`.
+    pub async fn load_inbox_event(
+        &self,
+        owner_id: &str,
+        channel: &str,
+        external_id: &str,
+    ) -> Result<Option<crate::inbox::InboxRecord>> {
+        self.store
+            .load_inbox_event(owner_id, channel, external_id)
             .await
     }
 

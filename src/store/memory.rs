@@ -10,6 +10,7 @@ use super::CalendarStore;
 use crate::crm::store::{CrmStore, SearchHit};
 use crate::crm::types::{Company, Contact, CrmSummary, Deal, Interaction};
 use crate::error::Result;
+use crate::inbox::InboxRecord;
 use crate::types::{BookingLink, Calendar};
 
 /// Ephemeral in-memory store (default, zero persistence).
@@ -21,6 +22,12 @@ pub struct MemoryStore {
     contacts: Arc<Mutex<HashMap<String, Contact>>>,
     deals: Arc<Mutex<HashMap<String, Deal>>>,
     interactions: Arc<Mutex<Vec<Interaction>>>,
+    /// Inbox ledger keyed by `owner_id\0channel\0external_id` (the dedup key).
+    inbox: Arc<Mutex<HashMap<String, InboxRecord>>>,
+}
+
+fn inbox_key(owner_id: &str, channel: &str, external_id: &str) -> String {
+    format!("{owner_id}\0{channel}\0{external_id}")
 }
 
 impl MemoryStore {
@@ -264,6 +271,42 @@ impl CrmStore for MemoryStore {
             .collect();
         out.sort_by(|a, b| a.last_name.cmp(&b.last_name));
         Ok(out)
+    }
+
+    async fn insert_inbox_event(&self, record: &InboxRecord) -> Result<bool> {
+        let mut map = self.inbox.lock().await;
+        let key = inbox_key(&record.owner_id, &record.channel, &record.external_id);
+        if map.contains_key(&key) {
+            return Ok(false);
+        }
+        map.insert(key, record.clone());
+        Ok(true)
+    }
+
+    async fn load_inbox_event(
+        &self,
+        owner_id: &str,
+        channel: &str,
+        external_id: &str,
+    ) -> Result<Option<InboxRecord>> {
+        let map = self.inbox.lock().await;
+        Ok(map.get(&inbox_key(owner_id, channel, external_id)).cloned())
+    }
+
+    async fn list_inbox_events(
+        &self,
+        owner_id: &str,
+        channel: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<InboxRecord>> {
+        let map = self.inbox.lock().await;
+        let mut out: Vec<InboxRecord> = map
+            .values()
+            .filter(|r| r.owner_id == owner_id && channel.map(|c| r.channel == c).unwrap_or(true))
+            .cloned()
+            .collect();
+        out.sort_by_key(|b| std::cmp::Reverse(b.at));
+        Ok(out.into_iter().take(limit).collect())
     }
 
     async fn search_crm(

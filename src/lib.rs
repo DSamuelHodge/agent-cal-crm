@@ -29,6 +29,7 @@ pub mod agent_api;
 pub mod availability;
 pub mod crm;
 pub mod error;
+pub mod inbox;
 pub mod rpc;
 pub mod scheduler;
 pub mod seed;
@@ -42,6 +43,7 @@ pub use crm::{
     InteractionInput, InteractionKind,
 };
 pub use error::{AgentError, Result, StoreError};
+pub use inbox::{InboxEvent, InboxRecord, InboxStatus, IngestOutcome, IngestStatus};
 pub use scheduler::{Booked, Rescheduled, Summary};
 pub use store::{CalendarStore, LibSqlStore, MemoryStore, NullStore};
 pub use types::{
