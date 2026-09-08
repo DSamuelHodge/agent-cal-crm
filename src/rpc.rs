@@ -35,6 +35,7 @@ use crate::crm::agent::AgentCrm;
 use crate::crm::types::{DealStage, InteractionDirection, InteractionKind};
 use crate::crm::{InteractionInput, SearchHit};
 use crate::error::{AgentError, Result};
+use crate::kill_switch::ChannelGate;
 use crate::parse_iso;
 use crate::scheduler::Booked;
 use crate::types::{Attendee, TimeSlot};
@@ -53,7 +54,31 @@ pub async fn dispatch(
     method: &str,
     params: &serde_json::Value,
 ) -> Result<serde_json::Value> {
-    let outcome = dispatch_inner(cal, crm, method, params).await;
+    dispatch_with_gate(cal, crm, &ChannelGate::new(), method, params).await
+}
+
+/// Dispatch with an explicit kill-switch gate.
+///
+/// The kill-switch check runs FIRST — before `dispatch_inner` and therefore
+/// before any send-gating/approval logic — so a disabled channel rejects
+/// every method carrying that channel with `AgentError::ChannelDisabled`.
+pub async fn dispatch_with_gate(
+    cal: &AgentCal,
+    crm: &AgentCrm,
+    gate: &ChannelGate,
+    method: &str,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value> {
+    // Kill-switch FIRST (before dispatch_inner, hence before any
+    // send-gating/approval logic). Folded into `outcome` so the rejection
+    // is still action-logged as `channel_disabled` below.
+    let outcome = match channel_for_method(method, params) {
+        Some(channel) => match gate.ensure_enabled(&channel) {
+            Ok(()) => dispatch_inner(cal, crm, gate, method, params).await,
+            Err(e) => Err(e),
+        },
+        None => dispatch_inner(cal, crm, gate, method, params).await,
+    };
     let result_code = match &outcome {
         Ok(_) => "ok",
         Err(e) => crate::actions::error_code(e),
@@ -78,6 +103,7 @@ pub async fn dispatch(
 async fn dispatch_inner(
     cal: &AgentCal,
     crm: &AgentCrm,
+    gate: &ChannelGate,
     method: &str,
     params: &serde_json::Value,
 ) -> Result<serde_json::Value> {
@@ -294,7 +320,7 @@ async fn dispatch_inner(
                     .unwrap_or_else(|| chrono::Utc::now().timestamp_millis()),
             };
             Ok(serde_json::to_value(
-                crate::inbox::ingest(crm, owner(p)?, event).await?,
+                crate::inbox::ingest_with_gate(crm, owner(p)?, event, gate).await?,
             )?)
         }
         "inbox.list" => {
@@ -585,6 +611,30 @@ async fn dispatch_inner(
             "unknown RPC method: {other}"
         ))),
     }
+}
+
+// ── kill-switch: channel extraction ─────────────────────────────────────────
+
+/// Extract the channel a method carries, if any.
+///
+/// Currently `inbox.ingest` (`params.event.channel`) and any method with a
+/// top-level string `channel` param (e.g. `inbox.list`). Returns `None` when
+/// the method carries no channel. Empty/whitespace channels are ignored so
+/// validation (`missing param`) still owns that error.
+fn channel_for_method(method: &str, params: &serde_json::Value) -> Option<String> {
+    if method == "inbox.ingest" {
+        return params
+            .get("event")
+            .and_then(|e| e.get("channel"))
+            .and_then(|v| v.as_str())
+            .filter(|c| !c.trim().is_empty())
+            .map(|c| c.to_string());
+    }
+    params
+        .get("channel")
+        .and_then(|v| v.as_str())
+        .filter(|c| !c.trim().is_empty())
+        .map(|c| c.to_string())
 }
 
 // ── param helpers ─────────────────────────────────────────────────────────────

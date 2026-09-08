@@ -32,6 +32,7 @@ Categories (exactly three):
 | `approval_not_found` | approval | The referenced approval does not exist. | Wrong approval id, pruned record, or the wrong owner. |
 | `approval_not_approved` | approval | The approval is not in the approved state. | Still pending, rejected, or expired; approve it with matching params, then retry. |
 | `limit_exceeded` | user | The daily send budget for this channel is exhausted. | Too many sends today; low-risk agent traffic is capped per UTC day — retry tomorrow. |
+| `channel_disabled` | internal | The channel is kill-switched off. | Re-enable the channel or use another channel for this send. |
 | `store_error` | internal | The persistence layer failed. | Disk/IO failure, corrupt row, or migration issue; retry, then inspect the store. |
 
 ## RPC

@@ -34,6 +34,7 @@ use crate::crm::agent::AgentCrm;
 use crate::crm::store::InteractionInput;
 use crate::crm::types::{Contact, InteractionDirection, InteractionKind};
 use crate::error::{AgentError, Result};
+use crate::kill_switch::ChannelGate;
 
 fn new_id() -> String {
     Uuid::new_v4().to_string()
@@ -275,6 +276,20 @@ pub async fn ingest(crm: &AgentCrm, owner_id: &str, event: InboxEvent) -> Result
             })
         }
     }
+}
+
+/// Kill-switched ingestion: rejects before any I/O when `event.channel` is
+/// disabled, so calling the agent function directly (bypassing dispatch)
+/// still fails closed. This is the underlying send-path enforcement point;
+/// [`crate::rpc::dispatch_with_gate`] enforces the same gate at dispatch.
+pub async fn ingest_with_gate(
+    crm: &AgentCrm,
+    owner_id: &str,
+    event: InboxEvent,
+    gate: &ChannelGate,
+) -> Result<IngestOutcome> {
+    gate.ensure_enabled(&event.channel)?;
+    ingest(crm, owner_id, event).await
 }
 
 /// List an owner's filed inbox records, newest first, optionally filtered by

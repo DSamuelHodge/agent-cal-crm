@@ -243,6 +243,17 @@ impl AgentCrm {
         crate::inbox::ingest(self, owner_id, event).await
     }
 
+    /// Kill-switched file (see `crate::inbox::ingest_with_gate`): rejects
+    /// when `event.channel` is disabled without touching the store.
+    pub async fn ingest_inbox_event_with_gate(
+        &self,
+        owner_id: &str,
+        event: crate::inbox::InboxEvent,
+        gate: &crate::kill_switch::ChannelGate,
+    ) -> Result<crate::inbox::IngestOutcome> {
+        crate::inbox::ingest_with_gate(self, owner_id, event, gate).await
+    }
+
     /// List filed inbox records, newest first.
     pub async fn list_inbox_events(
         &self,

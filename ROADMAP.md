@@ -42,11 +42,13 @@ Principles we keep as we grow:
 | Webhooks / push channel | ❌ Missing — agents must poll (`cal.upcoming`) |
 | Pipeline automation | ❌ Missing — `crm.advance_deal` is manual, no stage-change triggers |
 | Ingestion (email/SMS → interactions) | ❌ Missing — `crm.log_interaction` is manual |
-| Comms/inbox façade | ❌ Missing — outbound `aware.*` actions exist, but there is no unified inbound inbox (SMS/WhatsApp/notifications resolved to contacts) |
-| Action log | ❌ Missing — the `audit_log` table (`src/store/libsql_store.rs:256`) is data-provenance for the dedup review queue (`table_name, record_id, source_type, confidence`), not a record of issued actions |
-| Pending-approval state | ❌ Missing — no gate between "agent decided" and "message sent" anywhere in the tree |
+| Comms/inbox façade | ✅ Done — `src/inbox.rs` (`ingest`, `kind_for_channel`), `inbox.ingest` / `inbox.list` in `src/rpc.rs` |
+| Action log | ✅ Done — `src/actions.rs::record_action`, `action_log.list` / `action_log.query` in `src/rpc.rs` |
+| Pending-approval state | ✅ Done — `src/approvals.rs` (tiers, `approval.*` RPC, send-path enforcement) |
 
 ## Phase 1 — Safety substrate (inbox, action log, approvals)
+
+> Status: ✅ Done (2026-09-08) — all three items landed behind Phase 1 PRs.
 
 Goal: nothing the daemon can *send* on your behalf happens without a record
 and, for high-risk actions, explicit approval. This gates everything below —
@@ -70,6 +72,11 @@ until this exists.
    tiered-gated from config.
 
 ## Phase 2 — Production-grade daemon (robustness)
+
+> Status: in progress — three parallel streams (2026-09-08):
+> - error-taxonomy (item 4, structured error codes over RPC) — sibling stream.
+> - limits-ledger (idempotency keys, item 5) — sibling stream.
+> - kill-switch (Phase 2.5: per-channel `ChannelGate` + `AgentError::ChannelDisabled`, items 5/7 scope) — ✅ Done in this branch (`src/kill_switch.rs`, `tests/kill_switch.rs`).
 
 Goal: the daemon is safe to expose beyond loopback and safe to retry against.
 

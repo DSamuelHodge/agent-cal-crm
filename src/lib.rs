@@ -32,6 +32,7 @@ pub mod availability;
 pub mod crm;
 pub mod error;
 pub mod inbox;
+pub mod kill_switch;
 pub mod limits;
 pub mod rpc;
 pub mod scheduler;
@@ -49,6 +50,7 @@ pub use crm::{
 };
 pub use error::{AgentError, ErrorInfo, Result, StoreError, error_catalog, error_info};
 pub use inbox::{InboxEvent, InboxRecord, InboxStatus, IngestOutcome, IngestStatus};
+pub use kill_switch::{ChannelGate, KNOWN_CHANNELS, normalize_channel};
 pub use limits::LimitStatus;
 pub use scheduler::{Booked, Rescheduled, Summary};
 pub use store::{CalendarStore, LibSqlStore, MemoryStore, NullStore};

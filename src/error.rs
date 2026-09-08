@@ -107,6 +107,9 @@ pub enum AgentError {
     #[error("daily send budget exhausted: {0}")]
     LimitExceeded(String),
 
+    #[error("channel {0:?} is disabled (kill-switch)")]
+    ChannelDisabled(String),
+
     #[error(transparent)]
     Store(StoreError),
 }
@@ -254,6 +257,12 @@ pub fn error_info(e: &AgentError) -> ErrorInfo {
             meaning: "The daily send budget for this channel is exhausted.",
             likely_cause: "Too many sends today; low-risk agent traffic is capped per UTC day — retry tomorrow.",
         },
+        AgentError::ChannelDisabled(_) => ErrorInfo {
+            code: "channel_disabled",
+            category: "internal",
+            meaning: "The channel is kill-switched off.",
+            likely_cause: "Re-enable the channel or use another channel for this send.",
+        },
         AgentError::Store(_) => ErrorInfo {
             code: "store_error",
             category: "internal",
@@ -309,6 +318,7 @@ pub fn error_catalog() -> Vec<ErrorInfo> {
             | AgentError::ApprovalNotFound(_)
             | AgentError::ApprovalNotApproved(_)
             | AgentError::LimitExceeded(_)
+            | AgentError::ChannelDisabled(_)
             | AgentError::Store(_) => {}
         }
     }
