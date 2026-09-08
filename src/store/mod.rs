@@ -16,12 +16,13 @@ pub(crate) use libsql_store::{get_dt, get_int, get_json, get_opt_int, get_real, 
 
 use async_trait::async_trait;
 
+use crate::actions::ActionLogStore;
 use crate::error::Result;
 use crate::types::{BookingLink, Calendar};
 
 /// Minimal interface every store must implement.
 #[async_trait]
-pub trait CalendarStore: Send + Sync {
+pub trait CalendarStore: ActionLogStore {
     // ── Calendars ───────────────────────────────────────────────────────────
     async fn save(&self, calendar: &Calendar) -> Result<()>;
     async fn load(&self, owner_id: &str) -> Result<Option<Calendar>>;

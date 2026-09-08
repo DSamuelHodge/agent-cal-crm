@@ -14,6 +14,7 @@ use tokio::sync::Mutex;
 use libsql::{params, Connection, Row, Value};
 
 use super::CalendarStore;
+use crate::actions::{ActionActor, ActionLogEntry, ActionLogStore};
 use crate::error::{AgentError, Result, StoreError};
 use crate::types::{
     Attendee, AvailabilityWindow, Booking, BookingLink, Calendar, ConflictPolicy, RecurrenceRule,
@@ -167,6 +168,20 @@ CREATE INDEX IF NOT EXISTS idx_deals_company    ON deals(company_id);
 CREATE INDEX IF NOT EXISTS idx_interactions_owner   ON interactions(owner_id);
 CREATE INDEX IF NOT EXISTS idx_interactions_contact ON interactions(contact_id);
 CREATE INDEX IF NOT EXISTS idx_contacts_embedding ON contacts (libsql_vector_idx(embedding));
+
+-- ── Action log (append-only record of issued actions) ────────────────────────
+CREATE TABLE IF NOT EXISTS action_log (
+    id          TEXT PRIMARY KEY,
+    owner_id    TEXT NOT NULL,
+    actor       TEXT NOT NULL,
+    method      TEXT NOT NULL,
+    params_json TEXT NOT NULL DEFAULT '{}',
+    result      TEXT NOT NULL DEFAULT 'ok',
+    at_ms       INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_action_log_owner  ON action_log(owner_id, at_ms);
+CREATE INDEX IF NOT EXISTS idx_action_log_method ON action_log(owner_id, method, at_ms);
 "#;
 
 /// libSQL-backed [`CalendarStore`].
@@ -743,5 +758,89 @@ impl CalendarStore for LibSqlStore {
             .await
             .map_err(StoreError::from)?;
         Ok(n > 0)
+    }
+}
+
+fn decode_action(row: &Row) -> Result<ActionLogEntry> {
+    Ok(ActionLogEntry {
+        id: get_text(row, 0)?,
+        owner_id: get_text(row, 1)?,
+        actor: ActionActor::parse(&get_text(row, 2)?),
+        method: get_text(row, 3)?,
+        params_json: get_text(row, 4)?,
+        result: get_text(row, 5)?,
+        at_ms: get_int(row, 6)?,
+    })
+}
+
+const ACTION_COLS: &str =
+    "id, owner_id, actor, method, params_json, result, at_ms FROM action_log";
+
+#[async_trait]
+impl ActionLogStore for LibSqlStore {
+    async fn append_action(&self, entry: &ActionLogEntry) -> Result<()> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "INSERT INTO action_log
+             (id, owner_id, actor, method, params_json, result, at_ms)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+            params![
+                entry.id.as_str(),
+                entry.owner_id.as_str(),
+                entry.actor.as_str(),
+                entry.method.as_str(),
+                entry.params_json.as_str(),
+                entry.result.as_str(),
+                entry.at_ms,
+            ],
+        )
+        .await
+        .map_err(StoreError::from)?;
+        Ok(())
+    }
+
+    async fn list_actions(&self, owner_id: &str, limit: usize) -> Result<Vec<ActionLogEntry>> {
+        self.query_actions(owner_id, None, limit).await
+    }
+
+    async fn query_actions(
+        &self,
+        owner_id: &str,
+        method: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<ActionLogEntry>> {
+        let conn = self.conn.lock().await;
+        let mut out = Vec::new();
+        // `rowid DESC` breaks `at_ms` ties so newest-first is stable.
+        if let Some(method) = method {
+            let mut rows = conn
+                .query(
+                    &format!(
+                        "SELECT {ACTION_COLS} WHERE owner_id = ? AND method = ? \
+                         ORDER BY at_ms DESC, rowid DESC LIMIT ?"
+                    ),
+                    params![owner_id, method, limit as i64],
+                )
+                .await
+                .map_err(StoreError::from)?;
+            while let Some(row) = rows.next().await.map_err(StoreError::from)? {
+                out.push(decode_action(&row)?);
+            }
+        } else {
+            let mut rows = conn
+                .query(
+                    &format!(
+                        "SELECT {ACTION_COLS} WHERE owner_id = ? \
+                         ORDER BY at_ms DESC, rowid DESC LIMIT ?"
+                    ),
+                    params![owner_id, limit as i64],
+                )
+                .await
+                .map_err(StoreError::from)?;
+            while let Some(row) = rows.next().await.map_err(StoreError::from)? {
+                out.push(decode_action(&row)?);
+            }
+        }
+        Ok(out)
     }
 }

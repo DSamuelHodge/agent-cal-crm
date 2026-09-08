@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use chrono::Utc;
 
+use crate::actions::ActionLogStore;
 use crate::crm::store::{CrmStore, InteractionInput, SearchHit};
 use crate::crm::types::{Company, Contact, CrmSummary, Deal, DealStage, Interaction};
 use crate::error::{AgentError, Result};
@@ -28,6 +29,13 @@ impl AgentCrm {
     /// Build from an already-shared store handle.
     pub fn from_shared(store: Arc<dyn CrmStore>) -> Self {
         Self { store }
+    }
+
+    /// The shared action-log handle over this façade's store (same database
+    /// the calendar and CRM rows live in). Sibling workstreams pass this to
+    /// [`crate::actions::record_action`].
+    pub fn action_store(&self) -> &dyn ActionLogStore {
+        &*self.store
     }
 
     // ── Companies ──────────────────────────────────────────────────────────

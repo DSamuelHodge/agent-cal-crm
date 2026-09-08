@@ -3,6 +3,7 @@
 
 use async_trait::async_trait;
 
+use crate::actions::ActionLogStore;
 use crate::crm::types::{
     Company, Contact, CrmSummary, Deal, Interaction, InteractionDirection, InteractionKind,
 };
@@ -10,7 +11,7 @@ use crate::error::Result;
 
 /// Minimal interface every CRM store must implement.
 #[async_trait]
-pub trait CrmStore: Send + Sync {
+pub trait CrmStore: ActionLogStore {
     // ── Companies ──────────────────────────────────────────────────────────
     async fn save_company(&self, company: &Company) -> Result<()>;
     async fn load_company(&self, owner_id: &str, company_id: &str) -> Result<Option<Company>>;
