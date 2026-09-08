@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use tokio::sync::Mutex;
 
 use super::CalendarStore;
+use crate::actions::{ActionLogEntry, ActionLogStore};
 use crate::crm::store::{CrmStore, SearchHit};
 use crate::crm::types::{Company, Contact, CrmSummary, Deal, Interaction};
 use crate::error::Result;
@@ -21,6 +22,7 @@ pub struct MemoryStore {
     contacts: Arc<Mutex<HashMap<String, Contact>>>,
     deals: Arc<Mutex<HashMap<String, Deal>>>,
     interactions: Arc<Mutex<Vec<Interaction>>>,
+    actions: Arc<Mutex<Vec<ActionLogEntry>>>,
 }
 
 impl MemoryStore {
@@ -76,6 +78,38 @@ impl CalendarStore for MemoryStore {
 
     async fn delete_link(&self, link_id: &str) -> Result<bool> {
         Ok(self.links.lock().await.remove(link_id).is_some())
+    }
+}
+
+#[async_trait]
+impl ActionLogStore for MemoryStore {
+    async fn append_action(&self, entry: &ActionLogEntry) -> Result<()> {
+        self.actions.lock().await.push(entry.clone());
+        Ok(())
+    }
+
+    async fn list_actions(&self, owner_id: &str, limit: usize) -> Result<Vec<ActionLogEntry>> {
+        self.query_actions(owner_id, None, limit).await
+    }
+
+    async fn query_actions(
+        &self,
+        owner_id: &str,
+        method: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<ActionLogEntry>> {
+        let log = self.actions.lock().await;
+        let mut out: Vec<ActionLogEntry> = log
+            .iter()
+            .filter(|e| e.owner_id == owner_id && method.is_none_or(|m| e.method == m))
+            .cloned()
+            .collect();
+        // Newest first; stable sort keeps newer inserts first on `at_ms` ties
+        // because the borrow below iterates oldest→newest before reversing.
+        out.reverse();
+        out.sort_by_key(|e| std::cmp::Reverse(e.at_ms));
+        out.truncate(limit);
+        Ok(out)
     }
 }
 

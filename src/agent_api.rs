@@ -31,6 +31,7 @@ use tokio::sync::Mutex;
 use chrono::{DateTime, Datelike, TimeZone, Utc};
 
 use crate::availability::{self, CheckResult};
+use crate::actions::ActionLogStore;
 use crate::error::{AgentError, Result};
 use crate::scheduler::{self, Booked, Rescheduled, Summary};
 use crate::store::CalendarStore;
@@ -148,6 +149,13 @@ impl AgentCal {
     pub fn with_auto_save(mut self, auto_save: bool) -> Self {
         self.auto_save = auto_save;
         self
+    }
+
+    /// The shared action-log handle over this façade's store (same database
+    /// the calendar and CRM rows live in). Sibling workstreams pass this to
+    /// [`crate::actions::record_action`].
+    pub fn action_store(&self) -> &dyn ActionLogStore {
+        &*self.store
     }
 
     // ── Internal ───────────────────────────────────────────────────────────

@@ -21,6 +21,7 @@
 //! - `cal.create_calendar_simple`, `cal.add_window`, `cal.block`
 //! - `cal.create_link`, `cal.get_slots`, `cal.book`
 //! - `cal.get_booking`, `cal.list_bookings`, `cal.upcoming`, `cal.cancel`, `cal.summary`
+//! - `action_log.list`, `action_log.query`
 
 use crate::agent_api::{AgentCal, LinkParams};
 use crate::crm::agent::AgentCrm;
@@ -35,7 +36,39 @@ use crate::types::{Attendee, TimeSlot};
 ///
 /// `cal` and `crm` share the same store, so a call here sees the whole
 /// CoS operating picture (calendar + CRM) on one file.
+///
+/// Every call is appended to the owner-scoped action log (actor `rpc`) with
+/// its redacted params and result code. Logging is best-effort: a logging
+/// failure never fails the call itself.
 pub async fn dispatch(
+    cal: &AgentCal,
+    crm: &AgentCrm,
+    method: &str,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value> {
+    let outcome = dispatch_inner(cal, crm, method, params).await;
+    let result_code = match &outcome {
+        Ok(_) => "ok",
+        Err(e) => crate::actions::error_code(e),
+    };
+    let owner_id = params
+        .get("owner")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let _ = crate::actions::record_action(
+        cal.action_store(),
+        owner_id,
+        crate::actions::ActionActor::Rpc,
+        method,
+        params,
+        result_code,
+    )
+    .await;
+    outcome
+}
+
+/// The actual method table. `dispatch` wraps this with action logging.
+async fn dispatch_inner(
     cal: &AgentCal,
     crm: &AgentCrm,
     method: &str,
@@ -348,6 +381,23 @@ pub async fn dispatch(
             .await?,
         )?),
         "cal.summary" => Ok(serde_json::to_value(cal.summary(owner(p)?).await?)?),
+
+        // ── Action log ──────────────────────────────────────────────────
+        "action_log.list" => {
+            let limit = int_param(p, "limit").unwrap_or(50).min(500);
+            Ok(serde_json::to_value(
+                cal.action_store().list_actions(owner(p)?, limit).await?,
+            )?)
+        }
+        "action_log.query" => {
+            let limit = int_param(p, "limit").unwrap_or(50).min(500);
+            let filter = p.get("method").and_then(|v| v.as_str());
+            Ok(serde_json::to_value(
+                cal.action_store()
+                    .query_actions(owner(p)?, filter, limit)
+                    .await?,
+            )?)
+        }
 
         other => Err(AgentError::Validation(format!(
             "unknown RPC method: {other}"

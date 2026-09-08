@@ -3,6 +3,7 @@
 use async_trait::async_trait;
 
 use super::CalendarStore;
+use crate::actions::{ActionLogEntry, ActionLogStore};
 use crate::error::Result;
 use crate::types::{BookingLink, Calendar};
 
@@ -48,5 +49,25 @@ impl CalendarStore for NullStore {
 
     async fn delete_link(&self, _link_id: &str) -> Result<bool> {
         Ok(false)
+    }
+}
+
+#[async_trait]
+impl ActionLogStore for NullStore {
+    async fn append_action(&self, _entry: &ActionLogEntry) -> Result<()> {
+        Ok(())
+    }
+
+    async fn list_actions(&self, _owner_id: &str, _limit: usize) -> Result<Vec<ActionLogEntry>> {
+        Ok(Vec::new())
+    }
+
+    async fn query_actions(
+        &self,
+        _owner_id: &str,
+        _method: Option<&str>,
+        _limit: usize,
+    ) -> Result<Vec<ActionLogEntry>> {
+        Ok(Vec::new())
     }
 }
